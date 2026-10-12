@@ -8,7 +8,7 @@ ASPECTS = {
 
 # Ảnh gốc hơi nhỏ hơn khung xuất, phần dựng phóng lên cho lia máy mượt.
 GEN_SIZE = {
-    "16:9": (1024, 576),
+    "16:9": (1280, 720),
     "9:16": (576, 1024),
     "1:1": (768, 768),
 }
@@ -30,8 +30,14 @@ def craft_visual_prompt(base: str, style: str, lock: str, *, motion: bool) -> st
         blob = " ".join(parts).lower()
         if line and line.lower() not in blob:
             parts.append("consistent character: " + line)
+    blob = " ".join(parts).lower()
     if motion:
         parts.append("continuous camera move, no subtitles, no text, no logo")
+    elif "3d animated" in blob or "not a photograph" in blob:
+        parts.append("3D animated movie frame, expressive pose, no text, no letters, no logo, no watermark")
     else:
-        parts.append("cinematic film still, no text, no logo, no watermark")
+        parts.append(
+            "photorealistic RAW photo, sharp detailed faces, natural light, "
+            "no text, no letters, no subtitles, no logo, no watermark"
+        )
     return ". ".join(parts)

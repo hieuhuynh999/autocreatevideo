@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -14,6 +16,9 @@ from studio.specs import GEN_SIZE, craft_visual_prompt
 
 FONT = Path(r"C:\Windows\Fonts\segoeui.ttf")
 FONT_BOLD = Path(r"C:\Windows\Fonts\segoeuib.ttf")
+_IMAGE_LOCK = threading.Lock()
+_LAST_IMAGE = 0.0
+IMAGE_GAP = 42
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -90,6 +95,38 @@ def write_placeholder(path: Path, width: int, height: int, heading: str, body: s
     image.save(path, quality=90)
 
 
+def _download_image(prompt: str, dest: Path, seed: int, width: int, height: int) -> str | None:
+    """Tải một ảnh. Trả về None nếu thành công. Người gọi phải giữ khóa."""
+    global _LAST_IMAGE
+    last_error = "không rõ"
+    for attempt in range(3):
+        gap = IMAGE_GAP - (time.time() - _LAST_IMAGE)
+        if _LAST_IMAGE and gap > 0:
+            time.sleep(gap)
+        url = (
+            "https://image.pollinations.ai/prompt/"
+            + urllib.parse.quote(prompt)
+            + f"?width={width}&height={height}&nologo=true&model=flux&seed={(int(seed) + attempt) % 1_000_000}"
+        )
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=100) as response:
+                data = response.read()
+            image = Image.open(io.BytesIO(data))
+            image.load()
+            if image.width < 64 or image.height < 64:
+                raise ValueError("ảnh quá nhỏ")
+            grade(image).save(dest, quality=92)
+            _LAST_IMAGE = time.time()
+            return None
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            _LAST_IMAGE = time.time()
+            if not isinstance(exc, urllib.error.HTTPError) or exc.code != 402:
+                time.sleep(3)
+    return last_error
+
+
 def create_scene_image(
     folder: Path,
     index: int,
@@ -99,30 +136,30 @@ def create_scene_image(
     aspect: str,
     seed: int,
     fallback_text: str,
+    pose_b: str = "",
 ) -> dict:
     width, height = GEN_SIZE.get(aspect, GEN_SIZE["16:9"])
     folder.mkdir(parents=True, exist_ok=True)
     dest = folder / f"scene_{index:02d}.jpg"
+    second = folder / f"scene_{index:02d}_b.jpg"
+    if second.exists():
+        second.unlink()
+    if "photorealistic" in prompt.lower() or "3d animated" in prompt.lower():
+        style = ""
     final_prompt = craft_visual_prompt(prompt, style, lock, motion=False)
-    url = (
-        "https://image.pollinations.ai/prompt/"
-        + urllib.parse.quote(final_prompt)
-        + f"?width={width}&height={height}&nologo=true&model=flux&seed={int(seed) % 1_000_000}"
-    )
-    last_error = "không rõ"
-    for attempt in range(3):
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        try:
-            with urllib.request.urlopen(request, timeout=100) as response:
-                data = response.read()
-            image = Image.open(io.BytesIO(data))
-            image.load()
-            grade(image).save(dest, quality=90)
-            return {"file": dest.name, "placeholder": False}
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
-            if attempt < 2:
-                time.sleep(2 + attempt * 2)
-    print(f"Ảnh cảnh {index} lỗi: {last_error}", flush=True)
+    with _IMAGE_LOCK:
+        error = _download_image(final_prompt, dest, seed, width, height)
+        motion = False
+        if error is None and pose_b.strip():
+            second_prompt = craft_visual_prompt(pose_b, style, lock, motion=False)
+            second_error = _download_image(second_prompt, second, seed + 17, width, height)
+            motion = second_error is None
+            if second_error:
+                print(f"Tư thế 2 cảnh {index} lỗi: {second_error}", flush=True)
+                if second.exists():
+                    second.unlink()
+        if error is None:
+            return {"file": dest.name, "placeholder": False, "motion": motion}
+    print(f"Ảnh cảnh {index} lỗi: {error}", flush=True)
     write_placeholder(dest, width, height, f"Cảnh {index}", fallback_text or prompt)
-    return {"file": dest.name, "placeholder": True, "error": last_error}
+    return {"file": dest.name, "placeholder": True, "error": error, "motion": False}

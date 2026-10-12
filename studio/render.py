@@ -1,7 +1,8 @@
-"""Dựng animatic: lia máy trên storyboard, phụ đề, tiếng nền."""
+"""Dựng animatic: lia máy trên storyboard, phụ đề, lời đọc và nhạc nền."""
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from studio.images import write_placeholder
 from studio.specs import ASPECTS, MAX_SECONDS, MIN_SECONDS, craft_visual_prompt
+from studio.voice import synthesize
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 FPS = 24
@@ -132,6 +134,33 @@ def _zoom(mode: str, frames: int, width: int, height: int) -> str:
     )
 
 
+def _action_clip(pose_a: Path, pose_b: Path, subtitle: Path, dest: Path, width: int, height: int, frames: int) -> None:
+    """Đổi hai tư thế liên tục để thấy vẫy tay, vỗ tay, nhảy."""
+    duration = frames / FPS
+    fade_out = max(0.2, duration - 0.2)
+    fit = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={FPS},format=yuv420p"
+    graph = (
+        f"[0:v]{fit}[base];"
+        f"[1:v]{fit}[alt];"
+        "[base][alt]overlay=enable='lt(mod(t\\,0.64)\\,0.32)'[flip];"
+        f"[flip]fade=t=in:st=0:d=0.12,fade=t=out:st={fade_out:.2f}:d=0.16[vid];"
+        "[vid][2:v]overlay=0:0:format=auto,format=yuv420p[out]"
+    )
+    _run(
+        [
+            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(pose_a),
+            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(pose_b),
+            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(subtitle),
+            "-filter_complex", graph,
+            "-map", "[out]",
+            "-frames:v", str(frames),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+            str(dest),
+        ]
+    )
+
+
 def _clip(image: Path, subtitle: Path, dest: Path, width: int, height: int, frames: int, mode: str) -> None:
     graph = f"[0:v]{_zoom(mode, frames, width, height)}[vid];[vid][1:v]overlay=0:0:format=auto[out]"
     _run(
@@ -165,24 +194,112 @@ def _concat(clips: list[Path], dest: Path, list_file: Path) -> None:
     )
 
 
-def _add_bed(video: Path, dest: Path, duration: float) -> None:
-    tone = (
-        "aevalsrc=0.03*sin(2*PI*110*t)+0.018*sin(2*PI*164.81*t)+0.01*sin(2*PI*220*t)"
-        f":s=44100:d={duration:.2f},lowpass=f=1400,"
-        "afade=t=in:st=0:d=1.0,"
-        f"afade=t=out:st={max(0.2, duration - 1.4):.2f}:d=1.2,volume=0.85"
+def _media_duration(path: Path) -> float:
+    process = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", process.stderr or "")
+    if not match:
+        return 0
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _fit_voice(src: Path, dest: Path, limit: float) -> Path:
+    length = _media_duration(src)
+    if length <= 0 or length <= limit + 0.05:
+        return src
+    tempo = min(1.8, length / max(limit, 0.45))
     _run(
         [
             FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(video),
-            "-f", "lavfi", "-i", tone,
-            "-map", "0:v", "-map", "1:a",
+            "-i", str(src), "-filter:a", f"atempo={tempo:.3f}",
+            "-c:a", "pcm_s16le", str(dest),
+        ]
+    )
+    return dest
+
+
+def _narration(scene: dict) -> str:
+    subtitle = str(scene.get("subtitle") or "").strip()
+    dialogue = str(scene.get("dialogue") or "").strip()
+    if "—" in subtitle or "–" in subtitle:
+        return subtitle
+    return dialogue or subtitle
+
+
+def _music_graph(duration: float, bright: bool) -> str:
+    notes = (523.25, 659.25, 783.99) if bright else (196.00, 246.94, 392.00)
+    rate = "4.5" if bright else "2.2"
+    depth = "0.4" if bright else "0.22"
+    volume = "0.20" if bright else "0.13"
+    fade_out = max(0.3, duration - 1.3)
+    return (
+        f"sine=frequency={notes[0]}:sample_rate=44100:duration={duration:.2f}[a];"
+        f"sine=frequency={notes[1]}:sample_rate=44100:duration={duration:.2f}[b];"
+        f"sine=frequency={notes[2]}:sample_rate=44100:duration={duration:.2f}[c];"
+        "[a][b][c]amix=inputs=3:normalize=0,"
+        f"tremolo=f={rate}:d={depth},lowpass=f=2400,"
+        f"afade=t=in:st=0:d=0.5,afade=t=out:st={fade_out:.2f}:d=1.1,volume={volume}"
+    )
+
+
+def _add_soundtrack(
+    video: Path,
+    dest: Path,
+    duration: float,
+    cues: list[tuple[Path, float]],
+    music: bool,
+    bright: bool,
+    work: Path,
+) -> None:
+    args = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
+    filters: list[str] = []
+    labels: list[str] = []
+    for index, (path, start) in enumerate(cues):
+        args.extend(["-i", str(path)])
+        delay = max(0, int(start * 1000))
+        label = f"s{index}"
+        filters.append(f"[{index + 1}:a]adelay={delay}:all=1,apad=whole_dur={duration:.2f}[{label}]")
+        labels.append(f"[{label}]")
+    if labels:
+        filters.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:normalize=0[speech]")
+    if music:
+        fade_out = max(0.3, duration - 1.2)
+        if bright:
+            from studio.nursery import write_nursery
+
+            song = write_nursery(work / "nhac_thieu_nhi.wav", duration)
+            args.extend(["-i", str(song)])
+            bed = (
+                f"volume=0.7,afade=t=in:st=0:d=0.35,"
+                f"afade=t=out:st={fade_out:.2f}:d=1.0"
+            )
+        else:
+            args.extend(["-f", "lavfi", "-i", _music_graph(duration, False)])
+            bed = "anull"
+        music_index = 1 + len(cues)
+        filters.append(f"[{music_index}:a]{bed}[bed]")
+        if labels:
+            filters.append("[bed][speech]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[outa]")
+        else:
+            filters.append("[bed]alimiter=limit=0.95[outa]")
+    else:
+        filters.append("[speech]alimiter=limit=0.95[outa]")
+    args.extend(
+        [
+            "-filter_complex", ";".join(filters),
+            "-map", "0:v", "-map", "[outa]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
             "-shortest", "-movflags", "+faststart",
             str(dest),
         ]
     )
+    _run(args)
 
 
 def _prompt_pack(folder: Path, title: str, logline: str, lock: str, style: str, scenes: list[dict]) -> None:
@@ -246,15 +363,19 @@ def render_film(folder: Path, payload: dict) -> dict:
         duration = min(MAX_SECONDS, max(MIN_SECONDS, duration))
         frames = int(duration * FPS)
         source = folder / f"scene_{index:02d}.jpg"
+        pose_b = folder / f"scene_{index:02d}_b.jpg"
         if not source.is_file():
             write_placeholder(source, width, height, f"Cảnh {index}", str(scene.get("action") or scene.get("subtitle") or ""))
         still = work / f"still_{index:02d}.jpg"
         sub = work / f"sub_{index:02d}.png"
         clip = work / f"clip_{index:02d}.mp4"
-        _prepare_still(source, still, width, height)
         caption = str(scene.get("subtitle") or scene.get("dialogue") or "").strip()
         _subtitle_png(sub, caption, width, height)
-        _clip(still, sub, clip, width, height, frames, MODES[position % len(MODES)])
+        if pose_b.is_file():
+            _action_clip(source, pose_b, sub, clip, width, height, frames)
+        else:
+            _prepare_still(source, still, width, height)
+            _clip(still, sub, clip, width, height, frames, MODES[position % len(MODES)])
         clips.append(clip)
         total_frames += frames
 
@@ -271,10 +392,28 @@ def render_film(folder: Path, payload: dict) -> dict:
     _concat(clips, silent, work / "list.txt")
     final = folder / "phim.mp4"
     duration = total_frames / FPS
-    if payload.get("ambient", True):
+    want_voice = bool(payload.get("voice", True))
+    want_music = bool(payload.get("ambient", True))
+    cues: list[tuple[Path, float]] = []
+    if want_voice:
+        title_len = int(3.2 * FPS) / FPS
+        spoken_title = synthesize(title, work / "voice_title.mp3")
+        if spoken_title:
+            cues.append((_fit_voice(spoken_title, work / "voice_title_fit.wav", max(0.8, title_len - 0.5)), 0.25))
+        cursor = title_len
+        for position, scene in enumerate(scenes):
+            scene_len = int(min(MAX_SECONDS, max(MIN_SECONDS, float(scene.get("duration") or 5))) * FPS) / FPS
+            spoken = synthesize(_narration(scene), work / f"voice_{position:02d}.mp3")
+            if spoken:
+                fitted = _fit_voice(spoken, work / f"voice_{position:02d}_fit.wav", max(0.6, scene_len - 0.35))
+                cues.append((fitted, cursor + 0.12))
+            cursor += scene_len
+    bright = "tiếng Anh" in title or any("—" in str(scene.get("subtitle") or "") for scene in scenes)
+    if cues or want_music:
         try:
-            _add_bed(silent, final, duration)
-        except RuntimeError:
+            _add_soundtrack(silent, final, duration, cues, want_music, bright, work)
+        except RuntimeError as exc:
+            print(f"Không trộn được tiếng: {exc}", flush=True)
             shutil.copyfile(silent, final)
     else:
         _run(

@@ -153,6 +153,7 @@
         <button type="button" data-idea="Đêm mưa, một tài xế xe ôm công nghệ chở người phụ nữ về đúng căn nhà cô đã bỏ đi ba năm trước. Cô không bước xuống. Anh không giục. Xe đứng dưới đèn đường đến khi đèn chuyển vàng.">Mưa và xe ôm</button>
         <button type="button" data-idea="Lúc bốn giờ sáng, người bán bánh mì mở cửa và thấy chiếc ghế của cha mình, người đã mất tháng trước, vẫn còn hơi ấm. Ông không gọi ai. Ông pha một ly cà phê thứ hai.">Ghế còn ấm</button>
         <button type="button" data-idea="Thang máy kẹt giữa hai người đồng nghiệp đã tránh mặt nhau mười năm. Đèn nhấp nháy. Một người đưa chai nước mà không nhìn người kia. Cửa mở thì cả hai lại nhìn thẳng.">Thang máy kẹt</button>
+        <button type="button" data-genre="Trẻ em: vui chơi, học tiếng Anh" data-idea="Buổi sáng ở sân chơi, các bạn xin chào nhau. Cả nhóm cùng chơi và vỗ tay. Một bạn chỉ vào màu đỏ rồi nói cảm ơn. Cuối giờ mọi người tạm biệt.">Học tiếng Anh</button>
       </div>
       <div class="row">
         <div>
@@ -164,6 +165,7 @@
             <option>Kinh dị</option>
             <option>Khoa học viễn tưởng</option>
             <option>Cổ trang</option>
+            <option>Trẻ em: vui chơi, học tiếng Anh</option>
           </select>
         </div>
         <div>
@@ -206,7 +208,8 @@
       </select>
       <label for="lock">Khóa ngoại hình — cùng một câu này đi vào mọi cảnh</label>
       <input id="lock" placeholder="Ví dụ: woman, 30, hair in a bun, red raincoat, grey backpack">
-      <label><input id="ambient" type="checkbox" checked style="width:auto"> Thêm tiếng nền trầm, rất nhỏ</label>
+      <label><input id="voice" type="checkbox" checked style="width:auto"> Lồng tiếng đọc câu trên màn hình</label>
+      <label><input id="ambient" type="checkbox" checked style="width:auto"> Nhạc nền</label>
       <div class="actions">
         <button class="primary" id="write" type="button">1. Viết kịch bản</button>
         <button id="draw" type="button" disabled>2. Vẽ storyboard</button>
@@ -223,6 +226,7 @@
           <li>Xem animatic ở đây để chốt nhịp, phụ đề và thứ tự cảnh.</li>
           <li>Mang dòng CHUYỂN ĐỘNG sang Kling, Hailuo, Veo, Luma hoặc Runway để ra cảnh thật sự chuyển động.</li>
           <li>Dựng cuối ở CapCut hoặc DaVinci: ghép cảnh, giọng đọc tiếng Việt, nhạc, tiếng động.</li>
+          <li>Thể loại Trẻ em vẽ nhân vật 3D. Mỗi cảnh có hai tư thế, video đổi qua lại để thấy vẫy tay, vỗ tay, nhảy. Phụ đề kiểu Hello! — Xin chào. Nhạc là giai điệu dân gian hết bản quyền.</li>
         </ol>
         <p>Tool này làm bản nháp có hình và lia máy. Máy bạn không cần card đồ họa. Ảnh storyboard lấy qua mạng, miễn phí, đôi khi có watermark.</p>
       </details>
@@ -292,7 +296,8 @@
       state.sid = project.sid;
       state.scenes = project.scenes;
       const suggestedLock = project.character_lock || "";
-      if (!$("lock").value.trim() && suggestedLock && !suggestedLock.startsWith("the same adult lead")) {
+      const oldKidsLock = $("lock").value.includes("cheerful child, about 7");
+      if (suggestedLock && (!$("lock").value.trim() || oldKidsLock) && !suggestedLock.startsWith("the same adult lead")) {
         $("lock").value = suggestedLock;
       }
       $("empty").hidden = true;
@@ -316,6 +321,7 @@
       project.scenes.forEach((scene, index) => {
         const card = document.createElement("article");
         card.className = "scene";
+        card.dataset.poseB = scene.pose_b || "";
         const media = document.createElement("div");
         const img = document.createElement("img");
         img.className = "thumb";
@@ -376,7 +382,8 @@
         lock: $("lock").value,
         aspect: $("aspect").value,
         seed: Math.floor(Math.random() * 900000) + index,
-        fallback: field(card, "action")
+        fallback: field(card, "action"),
+        pose_b: card.dataset.poseB || ""
       });
       img.src = data.url;
       img.alt = data.placeholder ? "Khung chữ thay ảnh cảnh " + index : "Ảnh cảnh " + index;
@@ -387,6 +394,7 @@
     document.querySelectorAll("[data-idea]").forEach((button) => {
       button.addEventListener("click", () => {
         $("idea").value = button.dataset.idea;
+        if (button.dataset.genre) $("genre").value = button.dataset.genre;
       });
     });
 
@@ -403,7 +411,10 @@
         });
         paint(project);
         $("render").disabled = false;
-        say("Mỗi câu của bạn là một cảnh. Sửa cỡ cảnh, phụ đề hoặc prompt nếu muốn, rồi vẽ storyboard.");
+        const kids = ($("genre").value || "").startsWith("Trẻ em");
+        say(kids
+          ? "Kịch bản thiếu nhi dùng nhân vật 3D. Mỗi cảnh vẽ hai tư thế để thấy vẫy tay, vỗ tay hoặc nhảy. Mỗi cảnh khoảng 80 giây."
+          : "Mỗi câu của bạn là một cảnh. Sửa cỡ cảnh, phụ đề hoặc prompt nếu muốn, rồi vẽ storyboard.");
       } catch (error) {
         say(error.message, true);
       } finally {
@@ -417,7 +428,10 @@
       let placeholders = 0;
       try {
         for (let i = 0; i < cards.length; i += 1) {
-          say("Đang vẽ cảnh " + (i + 1) + "/" + cards.length + "…");
+          const kidsScene = (cards[i].dataset.poseB || "").includes("3D");
+          say(kidsScene
+            ? "Đang vẽ nhân vật 3D cảnh " + (i + 1) + "/" + cards.length + ", hai tư thế hành động. Khoảng 80 giây, đừng bấm lại."
+            : "Đang vẽ cảnh " + (i + 1) + "/" + cards.length + ". Mỗi ảnh khoảng 40 giây, đừng bấm lại.");
           const data = await drawOne(cards[i], i + 1, false);
           if (data.placeholder) placeholders += 1;
         }
@@ -443,6 +457,7 @@
           subtitle: field(card, "subtitle"),
           image_prompt: field(card, "image_prompt"),
           video_prompt: field(card, "video_prompt"),
+          pose_b: card.dataset.poseB || "",
           duration: Number(field(card, "duration") || $("seconds").value)
         }));
         const data = await post("/api/render", {
@@ -453,6 +468,7 @@
           style: $("style").value,
           aspect: $("aspect").value,
           ambient: $("ambient").checked,
+          voice: $("voice").checked,
           scenes
         });
         const box = $("result");

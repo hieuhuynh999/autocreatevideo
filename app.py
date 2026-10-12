@@ -188,6 +188,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             aspect,
             int(data.get("seed") or index * 97),
             str(data.get("fallback") or ""),
+            str(data.get("pose_b") or ""),
         )
         self._json(
             200,
@@ -216,6 +217,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                     "subtitle": str(item.get("subtitle") or "")[:140],
                     "image_prompt": str(item.get("image_prompt") or "")[:500],
                     "video_prompt": str(item.get("video_prompt") or "")[:500],
+                    "pose_b": str(item.get("pose_b") or "")[:500],
                     "duration": min(MAX_SECONDS, max(MIN_SECONDS, duration)),
                 }
             )
@@ -226,6 +228,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             "style": str(data.get("style") or "")[:160],
             "aspect": str(data.get("aspect") or "16:9"),
             "ambient": bool(data.get("ambient", True)),
+            "voice": bool(data.get("voice", True)),
             "scenes": clean_scenes,
         }
         (folder / "kich-ban.json").write_text(
