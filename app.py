@@ -9,13 +9,16 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from studio.images import create_scene_image
-from studio.render import render_film
+from studio.render import render_film, stitch_videos
+from studio.sample_story import sample_project
+from studio.adapters.motion import build_motion
+from studio.adapters.pollinations import key_ready, save_key
 from studio.screenplay import clean_idea, write_screenplay
-from studio.specs import ASPECTS, MAX_SCENES, MAX_SECONDS, MIN_SECONDS
+from studio.specs import ASPECTS, PHONE_ASPECT, MAX_SCENES, MAX_SECONDS, MIN_SECONDS
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web" / "index.html"
@@ -23,6 +26,14 @@ OUTPUT = ROOT / "output"
 HOST = "127.0.0.1"
 PORT = 7860
 SID_RE = re.compile(r"^[a-f0-9]{10}$")
+_JOBS: dict[str, dict] = {}
+_JOBS_LOCK = threading.RLock()
+_CURRENT_SID = ""
+
+
+def _job_message(job: dict, text: str) -> None:
+    with _JOBS_LOCK:
+        job["message"] = text
 
 
 def project_dir(sid: str) -> Path:
@@ -32,6 +43,24 @@ def project_dir(sid: str) -> Path:
     folder.relative_to(OUTPUT.resolve())
     folder.mkdir(parents=True, exist_ok=True)
     return folder
+
+
+def _motion_view(sid: str) -> dict:
+    if not SID_RE.fullmatch(sid or ""):
+        return {"mode": "idle", "message": "Chưa chạy.", "scenes": []}
+    with _JOBS_LOCK:
+        job = _JOBS.get(sid) or {"mode": "idle", "message": "Chưa chạy.", "scenes": []}
+        scenes = []
+        for item in job.get("scenes") or []:
+            image = str(item.get("image") or "")
+            if image and not image.startswith("/"):
+                image = f"/output/{sid}/{image}"
+            scenes.append({**item, "image": image})
+        return {
+            "mode": job.get("mode") or "idle",
+            "message": job.get("message") or "",
+            "scenes": scenes,
+        }
 
 
 class StudioHandler(BaseHTTPRequestHandler):
@@ -76,6 +105,16 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path.startswith("/output/"):
             self._send_output(path[len("/output/") :])
             return
+        if path == "/api/sample":
+            self._sample()
+            return
+        if path == "/api/key":
+            self._json(200, {"ready": key_ready()})
+            return
+        if path == "/api/motion":
+            sid = parse_qs(urlparse(self.path).query).get("sid", [""])[0]
+            self._json(200, _motion_view(sid))
+            return
         self.send_error(404)
 
     def _send_output(self, rel: str) -> None:
@@ -86,7 +125,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(404)
             return
-        if candidate.suffix.lower() not in {".jpg", ".mp4", ".txt", ".json"} or not candidate.is_file():
+        if candidate.suffix.lower() not in {".jpg", ".mp4", ".txt", ".json", ".srt"} or not candidate.is_file():
             self.send_error(404)
             return
         data = candidate.read_bytes()
@@ -118,6 +157,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             ".mp4": "video/mp4",
             ".txt": "text/plain; charset=utf-8",
             ".json": "application/json; charset=utf-8",
+            ".srt": "application/x-subrip; charset=utf-8",
         }[candidate.suffix.lower()]
         self.send_response(status)
         self.send_header("Content-Type", kind)
@@ -142,9 +182,16 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._image(data)
             elif path == "/api/render":
                 self._render(data)
+            elif path == "/api/motion":
+                self._motion(data)
+            elif path == "/api/key":
+                save_key(str(data.get("key") or ""))
+                self._json(200, {"ready": True})
+            elif path == "/api/stitch":
+                self._stitch(data)
             else:
                 self.send_error(404)
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             self._json(400, {"error": str(exc)})
         except Exception as exc:
             print("Lỗi:", type(exc).__name__, exc)
@@ -158,11 +205,23 @@ class StudioHandler(BaseHTTPRequestHandler):
         count = max(3, min(MAX_SCENES, count))
         screenplay = write_screenplay(
             idea,
-            str(data.get("genre") or "Đời thường"),
+            str(data.get("genre") or "Kỹ năng sống"),
             count,
             str(data.get("style") or ""),
             str(data.get("lock") or ""),
+            str(data.get("layout") or "Truyện kể"),
+            str(data.get("age") or "3–5"),
         )
+        sid = uuid4().hex[:10]
+        folder = project_dir(sid)
+        (folder / "kich-ban.json").write_text(
+            json.dumps(screenplay, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self._json(200, {"sid": sid, **screenplay})
+
+    def _sample(self) -> None:
+        screenplay = sample_project()
         sid = uuid4().hex[:10]
         folder = project_dir(sid)
         (folder / "kich-ban.json").write_text(
@@ -176,27 +235,71 @@ class StudioHandler(BaseHTTPRequestHandler):
         index = int(data.get("index") or 0)
         if index < 1 or index > MAX_SCENES:
             raise ValueError("Số cảnh không hợp lệ.")
-        aspect = str(data.get("aspect") or "16:9")
-        if aspect not in ASPECTS:
-            aspect = "16:9"
         result = create_scene_image(
             folder,
             index,
             str(data.get("prompt") or ""),
             str(data.get("style") or ""),
             str(data.get("lock") or ""),
-            aspect,
+            PHONE_ASPECT,
             int(data.get("seed") or index * 97),
             str(data.get("fallback") or ""),
             str(data.get("pose_b") or ""),
+            str(data.get("pose_c") or ""),
         )
         self._json(
             200,
             {
                 "url": f"/output/{folder.name}/{result['file']}?v={uuid4().hex[:6]}",
                 "placeholder": result["placeholder"],
+                "needs_key": bool(result.get("needs_key")),
+                "followed": bool(result.get("followed")),
+                "error": result.get("error") or "",
             },
         )
+
+    def _motion(self, data: dict) -> None:
+        folder = project_dir(str(data.get("sid") or ""))
+        scenes = data.get("scenes")
+        if not isinstance(scenes, list) or not scenes:
+            raise ValueError("Hãy tạo storyboard trước.")
+        clean = [dict(item) for item in scenes[:MAX_SCENES] if isinstance(item, dict)]
+        lock = str(data.get("lock") or "")
+        global _CURRENT_SID
+        with _JOBS_LOCK:
+            _CURRENT_SID = folder.name
+            current = _JOBS.get(folder.name)
+            if current and current.get("mode") == "running":
+                self._json(200, _motion_view(folder.name))
+                return
+            job = {
+                "mode": "running",
+                "message": "Đang tự gọi máy video đến khi mọi cảnh đều có clip.",
+                "scenes": [],
+            }
+            _JOBS[folder.name] = job
+
+        def work() -> None:
+            try:
+                result = build_motion(
+                    folder,
+                    clean,
+                    PHONE_ASPECT,
+                    lock,
+                    progress=lambda text: _job_message(job, text),
+                    stop=lambda: _CURRENT_SID != folder.name,
+                )
+                with _JOBS_LOCK:
+                    job.clear()
+                    job.update(result)
+            except Exception as exc:
+                print("Lỗi chuyển động:", type(exc).__name__, exc, flush=True)
+                job["mode"] = "partial"
+                job["message"] = str(exc)
+                job.setdefault("scenes", [])
+
+        threading.Thread(target=work, daemon=True).start()
+        self._json(200, _motion_view(folder.name))
 
     def _render(self, data: dict) -> None:
         folder = project_dir(str(data.get("sid") or ""))
@@ -218,6 +321,13 @@ class StudioHandler(BaseHTTPRequestHandler):
                     "image_prompt": str(item.get("image_prompt") or "")[:500],
                     "video_prompt": str(item.get("video_prompt") or "")[:500],
                     "pose_b": str(item.get("pose_b") or "")[:500],
+                    "pose_c": str(item.get("pose_c") or "")[:500],
+                    "line_en": str(item.get("line_en") or "")[:240],
+                    "line_vi": str(item.get("line_vi") or "")[:240],
+                    "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
+                    "camera": str(item.get("camera") or "")[:160],
+                    "goal": str(item.get("goal") or "")[:240],
+                    "continuity": str(item.get("continuity") or "")[:240],
                     "duration": min(MAX_SECONDS, max(MIN_SECONDS, duration)),
                 }
             )
@@ -226,9 +336,11 @@ class StudioHandler(BaseHTTPRequestHandler):
             "logline": str(data.get("logline") or "")[:240],
             "lock": str(data.get("lock") or "")[:300],
             "style": str(data.get("style") or "")[:160],
-            "aspect": str(data.get("aspect") or "16:9"),
+            "aspect": PHONE_ASPECT,
             "ambient": bool(data.get("ambient", True)),
             "voice": bool(data.get("voice", True)),
+            "kids": bool(data.get("kids", False)),
+            "frame": "caption" if data.get("frame") == "caption" else "full",
             "scenes": clean_scenes,
         }
         (folder / "kich-ban.json").write_text(
@@ -243,8 +355,30 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "prompts": f"/output/{folder.name}/prompt-video.txt",
                 "seconds": result["seconds"],
                 "folder": str(folder),
+                "warnings": result.get("warnings") or [],
+                "srt": f"/output/{folder.name}/{result.get('srt', 'phu-de.srt')}",
+                "export": f"/output/{folder.name}/{result.get('export', 'phim.mp4')}",
+                "motion": result.get("motion") or "storyboard",
             },
         )
+
+    def _stitch(self, data: dict) -> None:
+        raw = data.get("files") or []
+        if not isinstance(raw, list) or len(raw) < 2:
+            raise ValueError("Chọn ít nhất hai file mp4 trong thư mục output.")
+        paths = []
+        root = OUTPUT.resolve()
+        for item in raw[:8]:
+            candidate = (root / str(item)).resolve()
+            candidate.relative_to(root)
+            if candidate.suffix.lower() != ".mp4" or not candidate.is_file():
+                raise ValueError("Chỉ ghép file mp4 đã có trong output.")
+            paths.append(candidate)
+        width, height = ASPECTS[PHONE_ASPECT]
+        dest_dir = project_dir("a11ce00001")
+        dest = dest_dir / "phim.mp4"
+        seconds = stitch_videos(paths, dest, width, height)
+        self._json(200, {"video": f"/output/{dest_dir.name}/phim.mp4", "seconds": round(seconds, 1)})
 
 
 def main() -> None:

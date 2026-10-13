@@ -1,8 +1,11 @@
 """Khổ hình và câu prompt dùng chung."""
 
+# Khung đăng TikTok, Facebook Reels và YouTube Shorts. Mọi lần xuất đều dùng cỡ này.
+PHONE_ASPECT = "9:16"
+
 ASPECTS = {
     "16:9": (1280, 720),
-    "9:16": (720, 1280),
+    "9:16": (1080, 1920),
     "1:1": (720, 720),
 }
 
@@ -13,9 +16,9 @@ GEN_SIZE = {
     "1:1": (768, 768),
 }
 
-MAX_SCENES = 6
-MIN_SECONDS = 3
-MAX_SECONDS = 8
+MAX_SCENES = 8
+MIN_SECONDS = 4
+MAX_SECONDS = 12
 
 
 def craft_visual_prompt(base: str, style: str, lock: str, *, motion: bool) -> str:

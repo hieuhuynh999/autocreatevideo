@@ -11,7 +11,7 @@ import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont
 
 from studio.images import write_placeholder
-from studio.specs import ASPECTS, MAX_SECONDS, MIN_SECONDS, craft_visual_prompt
+from studio.specs import ASPECTS, PHONE_ASPECT, MAX_SECONDS, MIN_SECONDS, craft_visual_prompt
 from studio.voice import synthesize
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
@@ -94,7 +94,7 @@ def _subtitle_png(path: Path, text: str, width: int, height: int) -> None:
         return
     draw = ImageDraw.Draw(layer)
     font = _font(FONT_BODY, max(26, width // 28))
-    lines = _wrap(draw, caption, font, int(width * 0.84), 3)
+    lines = _wrap(draw, caption, font, int(width * 0.84), 2)
     line_h = int(font.size * 1.35)
     y = height - line_h * len(lines) - int(height * 0.08)
     for line in lines:
@@ -119,50 +119,38 @@ def _run(args: list[str]) -> None:
         raise RuntimeError(tail)
 
 
-def _zoom(mode: str, frames: int, width: int, height: int) -> str:
+def _zoom(mode: str, frames: int, width: int, height: int, edge: str = "both") -> str:
     if mode == "in":
-        z, x, y = "min(zoom+0.00115,1.16)", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        z, x, y = "min(zoom+0.0015,1.12)", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     elif mode == "out":
-        z, x, y = "if(eq(on,0),1.16,max(1.0,zoom-0.00115))", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        z, x, y = "if(eq(on,0),1.12,max(1.0,zoom-0.0015))", "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     elif mode == "right":
-        z, x, y = "1.1", f"(iw-iw/zoom)*on/{max(frames - 1, 1)}", "(ih-ih/zoom)/2"
+        z, x, y = "1.08", f"(iw-iw/zoom)*on/{max(frames - 1, 1)}", "(ih-ih/zoom)/2"
     else:
-        z, x, y = "1.1", f"(iw-iw/zoom)*(1-on/{max(frames - 1, 1)})", "(ih-ih/zoom)/2"
+        z, x, y = "1.08", f"(iw-iw/zoom)*(1-on/{max(frames - 1, 1)})", "(ih-ih/zoom)/2"
+    fades = []
+    if edge in {"both", "in"}:
+        fades.append("fade=t=in:st=0:d=0.12")
+    if edge in {"both", "out"}:
+        fades.append(f"fade=t=out:st={max(0.2, frames / FPS - 0.16):.2f}:d=0.14")
+    fade = ("," + ",".join(fades)) if fades else ""
     return (
-        f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={FPS},"
-        f"fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.3, frames / FPS - 0.28):.2f}:d=0.25,format=yuv420p"
+        f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={FPS}"
+        f"{fade},format=yuv420p"
     )
 
 
-def _action_clip(pose_a: Path, pose_b: Path, subtitle: Path, dest: Path, width: int, height: int, frames: int) -> None:
-    """Đổi hai tư thế liên tục để thấy vẫy tay, vỗ tay, nhảy."""
-    duration = frames / FPS
-    fade_out = max(0.2, duration - 0.2)
-    fit = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={FPS},format=yuv420p"
-    graph = (
-        f"[0:v]{fit}[base];"
-        f"[1:v]{fit}[alt];"
-        "[base][alt]overlay=enable='lt(mod(t\\,0.64)\\,0.32)'[flip];"
-        f"[flip]fade=t=in:st=0:d=0.12,fade=t=out:st={fade_out:.2f}:d=0.16[vid];"
-        "[vid][2:v]overlay=0:0:format=auto,format=yuv420p[out]"
-    )
-    _run(
-        [
-            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
-            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(pose_a),
-            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(pose_b),
-            "-loop", "1", "-t", f"{duration:.3f}", "-i", str(subtitle),
-            "-filter_complex", graph,
-            "-map", "[out]",
-            "-frames:v", str(frames),
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
-            str(dest),
-        ]
-    )
-
-
-def _clip(image: Path, subtitle: Path, dest: Path, width: int, height: int, frames: int, mode: str) -> None:
-    graph = f"[0:v]{_zoom(mode, frames, width, height)}[vid];[vid][1:v]overlay=0:0:format=auto[out]"
+def _clip(
+    image: Path,
+    subtitle: Path,
+    dest: Path,
+    width: int,
+    height: int,
+    frames: int,
+    mode: str,
+    edge: str = "both",
+) -> None:
+    graph = f"[0:v]{_zoom(mode, frames, width, height, edge)}[vid];[vid][1:v]overlay=0:0:format=auto[out]"
     _run(
         [
             FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
@@ -177,9 +165,203 @@ def _clip(image: Path, subtitle: Path, dest: Path, width: int, height: int, fram
     )
 
 
+def _cut_sequence(
+    images: list[Path],
+    subtitle: Path,
+    dest: Path,
+    work: Path,
+    width: int,
+    height: int,
+    frames: int,
+) -> bool:
+    """Cắt toàn cảnh, rồi cận hành động, rồi góc nghiêng. Mỗi góc giữ đủ lâu để thấy việc đang làm."""
+    usable = [path for path in images if path.is_file()]
+    if len(usable) < 2:
+        return False
+    counts = [frames // len(usable)] * len(usable)
+    counts[-1] += frames - sum(counts)
+    modes = ("in", "right", "out")
+    parts: list[Path] = []
+    for index, (image, count) in enumerate(zip(usable, counts)):
+        if count < 8:
+            continue
+        still = work / f"{dest.stem}_still_{index}.jpg"
+        part = work / f"{dest.stem}_part_{index}.mp4"
+        _prepare_still(image, still, width, height)
+        edge = "in" if index == 0 else "out" if index == len(usable) - 1 else "none"
+        _clip(still, subtitle, part, width, height, count, modes[index % 3], edge)
+        parts.append(part)
+    if len(parts) < 2:
+        return False
+    _concat(parts, dest, work / f"{dest.stem}_cuts.txt")
+    return True
+
+
 def _prepare_still(source: Path, dest: Path, width: int, height: int) -> None:
     with Image.open(source) as image:
         _cover(image, width * 2, height * 2).save(dest, quality=92)
+
+
+def _layout_b_still(
+    source: Path,
+    dest: Path,
+    width: int,
+    height: int,
+    title: str,
+    english: str,
+    vietnamese: str,
+) -> None:
+    """Tiêu đề trên, hình giữa, tiếng Anh rồi tiếng Việt ở dưới. Chữ không nằm trong ảnh AI."""
+    canvas = Image.new("RGB", (width, height), (255, 248, 236))
+    draw = ImageDraw.Draw(canvas)
+    top = max(64, int(height * 0.11))
+    bottom = max(110, int(height * 0.24))
+    mid_h = height - top - bottom
+    title_font = _font(FONT_TITLE, max(22, width // 24))
+    draw.text((width / 2, top / 2), title[:42], anchor="mm", fill=(47, 125, 120), font=title_font)
+    with Image.open(source) as image:
+        canvas.paste(_cover(image.convert("RGB"), width, mid_h), (0, top))
+    en_font = _font(FONT_TITLE, max(20, width // 28))
+    vi_font = _font(FONT_BODY, max(18, width // 30))
+    y = top + mid_h + 14
+    for line in _wrap(draw, english or "", en_font, int(width * 0.9), 2):
+        draw.text((width / 2, y), line, anchor="mt", fill=(43, 36, 28), font=en_font)
+        y += int(en_font.size * 1.25)
+    y += 6
+    for line in _wrap(draw, vietnamese or "", vi_font, int(width * 0.9), 2):
+        draw.text((width / 2, y), line, anchor="mt", fill=(180, 78, 52), font=vi_font)
+        y += int(vi_font.size * 1.25)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(dest, quality=92)
+
+
+def _hold(image: Path, dest: Path, width: int, height: int, frames: int, edge: str) -> None:
+    duration = frames / FPS
+    fades = []
+    if edge in {"both", "in"}:
+        fades.append("fade=t=in:st=0:d=0.12")
+    if edge in {"both", "out"}:
+        fades.append(f"fade=t=out:st={max(0.16, duration - 0.16):.2f}:d=0.14")
+    fade = ("," + ",".join(fades)) if fades else ""
+    _run(
+        [
+            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-loop", "1", "-framerate", str(FPS), "-i", str(image),
+            "-vf",
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={FPS}{fade},format=yuv420p",
+            "-frames:v", str(frames),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+            str(dest),
+        ]
+    )
+
+
+def _caption_mask(path: Path, width: int, height: int, title: str, english: str, vietnamese: str) -> tuple[int, int]:
+    top = max(64, int(height * 0.11))
+    bottom = max(110, int(height * 0.24))
+    if (height - top - bottom) % 2:
+        bottom += 1
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([0, 0, width, top], fill=(255, 248, 236, 255))
+    draw.rectangle([0, height - bottom, width, height], fill=(255, 248, 236, 255))
+    title_font = _font(FONT_TITLE, max(22, width // 24))
+    draw.text((width / 2, top / 2), title[:42], anchor="mm", fill=(47, 125, 120, 255), font=title_font)
+    en_font = _font(FONT_TITLE, max(20, width // 28))
+    vi_font = _font(FONT_BODY, max(18, width // 30))
+    y = height - bottom + 14
+    for line in _wrap(draw, english or "", en_font, int(width * 0.9), 2):
+        draw.text((width / 2, y), line, anchor="mt", fill=(43, 36, 28, 255), font=en_font)
+        y += int(en_font.size * 1.25)
+    y += 6
+    for line in _wrap(draw, vietnamese or "", vi_font, int(width * 0.9), 2):
+        draw.text((width / 2, y), line, anchor="mt", fill=(180, 78, 52, 255), font=vi_font)
+        y += int(vi_font.size * 1.25)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path)
+    return top, height - top - bottom
+
+
+def _fit(width: int, height: int, color: str) -> str:
+    """Thu video vào khung rồi mới thêm viền. Tránh pad nhỏ hơn hình sau khi làm tròn."""
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"scale=w='min(iw\\,{width})':h='min(ih\\,{height})',"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={color}"
+    )
+
+
+def _place_motion(
+    video: Path,
+    dest: Path,
+    work: Path,
+    width: int,
+    height: int,
+    frames: int,
+    subtitle: Path,
+    title: str,
+    english: str,
+    vietnamese: str,
+    frame_mode: str,
+) -> None:
+    """Đặt clip chuyển động vào khung, không kéo méo. Giữ con vật trong hình."""
+    duration = frames / FPS
+    if frame_mode == "caption":
+        mask = work / f"{dest.stem}_mask.png"
+        top, mid_h = _caption_mask(mask, width, height, title, english, vietnamese)
+        _run(
+            [
+                FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"color=c=0xFFF8EC:s={width}x{height}:r={FPS}:d={duration:.2f}",
+                "-i", str(video),
+                "-loop", "1", "-i", str(mask),
+                "-filter_complex",
+                (
+                    f"[1:v]{_fit(width, mid_h, '0xFFF8EC')},fps={FPS},"
+                    f"tpad=stop_mode=clone:stop_duration={duration + 1:.2f},trim=duration={duration:.2f},setpts=PTS-STARTPTS[vid];"
+                    f"[0:v][vid]overlay=0:{top}:shortest=1[base];"
+                    "[base][2:v]overlay=0:0:shortest=1,format=yuv420p"
+                ),
+                "-an", "-frames:v", str(frames),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+                str(dest),
+            ]
+        )
+        return
+    _run(
+        [
+            FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(video),
+            "-loop", "1", "-i", str(subtitle),
+            "-filter_complex",
+            (
+                f"[0:v]{_fit(width, height, 'black')},fps={FPS},"
+                f"tpad=stop_mode=clone:stop_duration={duration + 1:.2f},trim=duration={duration:.2f},setpts=PTS-STARTPTS[vid];"
+                "[vid][1:v]overlay=0:0:shortest=1,format=yuv420p"
+            ),
+            "-an", "-frames:v", str(frames),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+            str(dest),
+        ]
+    )
+
+
+def _hold_sequence(images: list[Path], dest: Path, work: Path, width: int, height: int, frames: int) -> None:
+    usable = [path for path in images if path.is_file()] or images[:1]
+    counts = [frames // len(usable)] * len(usable)
+    counts[-1] += frames - sum(counts)
+    parts: list[Path] = []
+    for index, (image, count) in enumerate(zip(usable, counts)):
+        if count < 8:
+            continue
+        part = work / f"{dest.stem}_hold_{index}.mp4"
+        edge = "in" if index == 0 else "out" if index == len(usable) - 1 else "none"
+        _hold(image, part, width, height, count, edge)
+        parts.append(part)
+    if len(parts) == 1:
+        shutil.copyfile(parts[0], dest)
+        return
+    _concat(parts, dest, work / f"{dest.stem}_holds.txt")
 
 
 def _concat(clips: list[Path], dest: Path, list_file: Path) -> None:
@@ -213,7 +395,7 @@ def _fit_voice(src: Path, dest: Path, limit: float) -> Path:
     length = _media_duration(src)
     if length <= 0 or length <= limit + 0.05:
         return src
-    tempo = min(1.8, length / max(limit, 0.45))
+    tempo = min(1.25, length / max(limit, 0.45))
     _run(
         [
             FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
@@ -225,8 +407,10 @@ def _fit_voice(src: Path, dest: Path, limit: float) -> Path:
 
 
 def _narration(scene: dict) -> str:
-    subtitle = str(scene.get("subtitle") or "").strip()
     dialogue = str(scene.get("dialogue") or "").strip()
+    subtitle = str(scene.get("subtitle") or "").strip()
+    if "—" in dialogue or "–" in dialogue:
+        return dialogue
     if "—" in subtitle or "–" in subtitle:
         return subtitle
     return dialogue or subtitle
@@ -276,7 +460,7 @@ def _add_soundtrack(
             song = write_nursery(work / "nhac_thieu_nhi.wav", duration)
             args.extend(["-i", str(song)])
             bed = (
-                f"volume=0.7,afade=t=in:st=0:d=0.35,"
+                f"volume=0.42,afade=t=in:st=0:d=0.35,"
                 f"afade=t=out:st={fade_out:.2f}:d=1.0"
             )
         else:
@@ -285,7 +469,9 @@ def _add_soundtrack(
         music_index = 1 + len(cues)
         filters.append(f"[{music_index}:a]{bed}[bed]")
         if labels:
-            filters.append("[bed][speech]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[outa]")
+            filters.append("[speech]asplit=2[sp][key]")
+            filters.append("[bed][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[ducked]")
+            filters.append("[ducked][sp]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[outa]")
         else:
             filters.append("[bed]alimiter=limit=0.95[outa]")
     else:
@@ -331,9 +517,22 @@ def _prompt_pack(folder: Path, title: str, logline: str, lock: str, style: str, 
     (folder / "prompt-video.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
+def _write_srt(path: Path, rows: list[tuple[float, float, str]]) -> None:
+    def stamp(seconds: float) -> str:
+        ms = max(0, int(round(seconds * 1000)))
+        hours, ms = divmod(ms, 3_600_000)
+        minutes, ms = divmod(ms, 60_000)
+        secs, ms = divmod(ms, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+    blocks = []
+    for index, (start, end, text) in enumerate(rows, start=1):
+        blocks.append(f"{index}\n{stamp(start)} --> {stamp(max(end, start + 0.3))}\n{text}\n")
+    path.write_text("\n".join(blocks), encoding="utf-8")
+
+
 def render_film(folder: Path, payload: dict) -> dict:
-    aspect = payload.get("aspect") if payload.get("aspect") in ASPECTS else "16:9"
-    width, height = ASPECTS[aspect]
+    width, height = ASPECTS[PHONE_ASPECT]
     title = str(payload.get("title") or "Phim ngắn")[:80]
     logline = str(payload.get("logline") or "")[:240]
     lock = str(payload.get("lock") or "")[:300]
@@ -356,14 +555,33 @@ def render_film(folder: Path, payload: dict) -> dict:
     _clip(title_still, work / "title.png", title_clip, width, height, int(3.2 * FPS), "in")
     clips.append(title_clip)
 
+    want_voice = bool(payload.get("voice", True))
+    warnings: list[str] = []
+    spoken: list[Path | None] = []
+    lengths: list[float] = []
+    for position, scene in enumerate(scenes):
+        duration = min(MAX_SECONDS, max(MIN_SECONDS, float(scene.get("duration") or 6)))
+        audio = synthesize(_narration(scene), work / f"voice_{position:02d}.mp3") if want_voice else None
+        if audio:
+            need = _media_duration(audio) + 0.55
+            if need > duration + 0.15:
+                if need <= MAX_SECONDS:
+                    duration = need
+                    warnings.append(f"Cảnh {position + 1} được kéo dài để không cắt lời đọc.")
+                else:
+                    warnings.append(
+                        f"Cảnh {position + 1} có câu dài hơn {int(MAX_SECONDS)} giây. Lời được đọc nhanh hơn một chút, không bị cắt cụt."
+                    )
+        spoken.append(audio)
+        lengths.append(duration)
+
     total_frames = int(3.2 * FPS)
+    used_motion = False
     for position, scene in enumerate(scenes):
         index = int(scene.get("index") or position + 1)
-        duration = float(scene.get("duration") or 5)
-        duration = min(MAX_SECONDS, max(MIN_SECONDS, duration))
+        duration = lengths[position]
         frames = int(duration * FPS)
         source = folder / f"scene_{index:02d}.jpg"
-        pose_b = folder / f"scene_{index:02d}_b.jpg"
         if not source.is_file():
             write_placeholder(source, width, height, f"Cảnh {index}", str(scene.get("action") or scene.get("subtitle") or ""))
         still = work / f"still_{index:02d}.jpg"
@@ -371,9 +589,50 @@ def render_film(folder: Path, payload: dict) -> dict:
         clip = work / f"clip_{index:02d}.mp4"
         caption = str(scene.get("subtitle") or scene.get("dialogue") or "").strip()
         _subtitle_png(sub, caption, width, height)
-        if pose_b.is_file():
-            _action_clip(source, pose_b, sub, clip, width, height, frames)
-        else:
+        motion_file = folder / f"scene_{index:02d}_motion.mp4"
+        if motion_file.is_file():
+            used_motion = True
+            _place_motion(
+                motion_file,
+                clip,
+                work,
+                width,
+                height,
+                frames,
+                sub,
+                title,
+                str(scene.get("line_en") or ""),
+                str(scene.get("line_vi") or caption),
+                str(payload.get("frame") or "full"),
+            )
+            clips.append(clip)
+            total_frames += frames
+            continue
+        angles = [
+            path
+            for path in (
+                folder / f"scene_{index:02d}_b.jpg",
+                source,
+                folder / f"scene_{index:02d}_c.jpg",
+            )
+            if path.is_file()
+        ] or [source]
+        if payload.get("frame") == "caption":
+            framed: list[Path] = []
+            for shot_index, shot in enumerate(angles):
+                framed_path = work / f"framed_{index:02d}_{shot_index}.jpg"
+                _layout_b_still(
+                    shot,
+                    framed_path,
+                    width,
+                    height,
+                    title,
+                    str(scene.get("line_en") or ""),
+                    str(scene.get("line_vi") or caption),
+                )
+                framed.append(framed_path)
+            _hold_sequence(framed, clip, work, width, height, frames)
+        elif not _cut_sequence(angles, sub, clip, work, width, height, frames):
             _prepare_still(source, still, width, height)
             _clip(still, sub, clip, width, height, frames, MODES[position % len(MODES)])
         clips.append(clip)
@@ -392,23 +651,27 @@ def render_film(folder: Path, payload: dict) -> dict:
     _concat(clips, silent, work / "list.txt")
     final = folder / "phim.mp4"
     duration = total_frames / FPS
-    want_voice = bool(payload.get("voice", True))
     want_music = bool(payload.get("ambient", True))
     cues: list[tuple[Path, float]] = []
+    srt_rows: list[tuple[float, float, str]] = []
+    title_len = int(3.2 * FPS) / FPS
     if want_voice:
-        title_len = int(3.2 * FPS) / FPS
         spoken_title = synthesize(title, work / "voice_title.mp3")
         if spoken_title:
             cues.append((_fit_voice(spoken_title, work / "voice_title_fit.wav", max(0.8, title_len - 0.5)), 0.25))
         cursor = title_len
         for position, scene in enumerate(scenes):
-            scene_len = int(min(MAX_SECONDS, max(MIN_SECONDS, float(scene.get("duration") or 5))) * FPS) / FPS
-            spoken = synthesize(_narration(scene), work / f"voice_{position:02d}.mp3")
-            if spoken:
-                fitted = _fit_voice(spoken, work / f"voice_{position:02d}_fit.wav", max(0.6, scene_len - 0.35))
-                cues.append((fitted, cursor + 0.12))
+            scene_len = int(lengths[position] * FPS) / FPS
+            audio = spoken[position]
+            if audio:
+                fitted = _fit_voice(audio, work / f"voice_{position:02d}_fit.wav", max(0.6, scene_len - 0.35))
+                start = cursor + 0.12
+                cues.append((fitted, start))
+                caption = str(scene.get("subtitle") or scene.get("dialogue") or "").strip()
+                if caption:
+                    srt_rows.append((start, min(cursor + scene_len - 0.05, start + _media_duration(fitted)), caption))
             cursor += scene_len
-    bright = "tiếng Anh" in title or any("—" in str(scene.get("subtitle") or "") for scene in scenes)
+    bright = bool(payload.get("kids")) or "tiếng Anh" in title or any("—" in str(scene.get("subtitle") or "") for scene in scenes)
     if cues or want_music:
         try:
             _add_soundtrack(silent, final, duration, cues, want_music, bright, work)
@@ -422,5 +685,63 @@ def render_film(folder: Path, payload: dict) -> dict:
                 "-i", str(silent), "-c", "copy", "-movflags", "+faststart", str(final),
             ]
         )
+    srt = folder / "phu-de.srt"
+    _write_srt(srt, srt_rows)
+    if bright and want_music:
+        (folder / "giay-phep-nhac.txt").write_text(
+            "\n".join(
+                [
+                    "Nhạc: Liên khúc thiếu nhi dân gian",
+                    "Tác phẩm: Twinkle Twinkle Little Star; Mary Had a Little Lamb; Frère Jacques",
+                    "Giấy phép: giai điệu thuộc phạm vi công cộng. File này do tool tự đánh, không phải bản thu của ca sĩ.",
+                    "Được dùng trong video đã xuất. Không cam kết phần mềm nhận diện nhạc sẽ bỏ qua.",
+                    "Ngày kiểm tra: 2026-10-12",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    exports = folder / "xuat"
+    exports.mkdir(exist_ok=True)
+    version = len(list(exports.glob("phim-*.mp4"))) + 1
+    archived = exports / f"phim-{version:02d}.mp4"
+    shutil.copyfile(final, archived)
     shutil.rmtree(work, ignore_errors=True)
-    return {"file": final.name, "seconds": round(duration, 1)}
+    return {
+        "file": final.name,
+        "seconds": round(duration, 1),
+        "warnings": warnings,
+        "srt": srt.name,
+        "export": f"xuat/{archived.name}",
+        "motion": "video" if used_motion else "storyboard",
+    }
+
+
+def stitch_videos(paths: list[Path], dest: Path, width: int, height: int) -> float:
+    """Ghép vài video, căn khung bằng viền, không kéo méo."""
+    if len(paths) < 2:
+        raise ValueError("Cần ít nhất hai video để ghép.")
+    work = dest.parent / "_ghep"
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    parts: list[Path] = []
+    fit = (
+        f"{_fit(width, height, 'black')},fps={FPS},format=yuv420p"
+    )
+    for index, path in enumerate(paths):
+        part = work / f"part_{index:02d}.mp4"
+        _run(
+            [
+                FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(path),
+                "-vf", fit,
+                "-c:v", "libx264", "-c:a", "aac", "-ar", "44100", "-ac", "1",
+                str(part),
+            ]
+        )
+        parts.append(part)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _concat(parts, dest, work / "list.txt")
+    duration = _media_duration(dest)
+    shutil.rmtree(work, ignore_errors=True)
+    return duration

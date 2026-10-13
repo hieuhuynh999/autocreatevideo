@@ -1,6 +1,46 @@
-# Xưởng phim ngắn
+# Kids 3D Story Video Creator
 
-Tool này chạy trên máy bạn. Nó biến một ý tưởng thành kịch bản, ảnh storyboard, và một video animatic có phụ đề. Cảnh chuyển động thật (người đi, mưa rơi, máy quay lia) tạo tiếp ở Kling, Hailuo, Veo, Luma hoặc Runway bằng file prompt mà tool xuất ra.
+Tool chạy trên máy bạn bằng Python (`python app.py` hoặc `chay.bat`). Trình duyệt mở `http://127.0.0.1:7860`.
+
+Yêu cầu React và FastAPI chưa chạy được trên máy này vì chưa có Node và chưa cài FastAPI. Máy chủ hiện tại là Python thư viện chuẩn. Ảnh, giọng, dựng phim và ghép video nằm trong các module `studio/`.
+
+## Phần chạy thật
+
+- Chia kịch bản thành cảnh, kể cả dự án mẫu **Ong Bông và Châu Chấu Lá** (sáu cảnh, lời Anh và Việt, hành động theo giây).
+- Sửa từng cảnh, thêm hành động, khóa hồ sơ nhân vật trên giao diện.
+- Vẽ ảnh qua Pollinations khi bấm **Tạo ảnh**. Mỗi ảnh cách nhau khoảng 40 giây. Model ảnh thường không giữ đúng hành động và trang phục.
+- Giọng đọc edge-tts, phụ đề lấy từ kịch bản, nhạc giai điệu dân gian tool tự đánh (Twinkle Twinkle, Mary Had a Little Lamb, Frère Jacques). Nhạc nhỏ lại khi có lời. Nếu câu dài hơn cảnh, cảnh được kéo đến tối đa 12 giây.
+- Bố cục B: tiêu đề trên, hình giữa, câu Anh rồi câu Việt do chương trình vẽ, không nhờ model ảnh viết chữ.
+- Xuất MP4 bằng FFmpeg. **Ghép nhiều video** căn khung bằng viền, không kéo méo.
+
+## Cách các cảnh bám nhau
+
+1. **Tạo ảnh cảnh 1.** Đây là mẫu nhân vật và khu vườn.
+2. **Cảnh 2, 3…** không vẽ lại từ đầu. Tool gửi đúng ảnh cảnh 1 và chỉ yêu cầu đổi hành động. Màu, trang phục và bối cảnh giữ theo ảnh đó.
+3. **Tạo chuyển động** lấy ảnh của từng cảnh làm khung đầu. Engine chỉ làm các con vật đang có trong hình cử động, máy đứng yên, không kéo con vật ra khỏi khung.
+4. **Xem trước** ghép lời đọc và phụ đề lên các clip đó.
+
+Bước 2 và 3 gọi Pollinations (sửa ảnh `kontext`, chuyển động `wan-fast`). Cần khóa lưu tại `studio/pollinations.key` hoặc dán vào ô **Lưu khóa** trên giao diện. Khóa không gửi lại cho trình duyệt. Không có khóa thì cảnh 1 vẫn vẽ được bằng ảnh miễn phí, còn cảnh sau và chuyển động dừng lại thay vì vẽ nhân vật khác.
+
+## Phần đang mô phỏng
+
+- Đồng bộ môi. Giọng đọc và hình miệng là hai việc riêng.
+- Hiệu ứng bay, bước chân, đặt đồ, uống nước chưa có file âm thanh riêng.
+- Chi phí hiển thị 0 đồng. Ảnh cảnh 1 dùng lượt miễn phí. Cảnh sau và chuyển động tính theo khóa Pollinations.
+- Khi chưa có khóa, tool không vẽ cảnh 2 bằng một ảnh mới. Việc đó sẽ làm nhân vật khác cảnh 1.
+
+## Mở tool
+
+1. Cài Python 3.
+2. Bấm đúp `chay.bat`.
+3. Bấm **Kịch bản mẫu** để nạp Ong Bông và Châu Chấu Lá, hoặc dán kịch bản rồi bấm **Tạo storyboard**.
+4. Duyệt hành động. Bấm **Tạo ảnh** nếu muốn hình. Bấm **Xem trước** để có file MP4 storyboard.
+
+File giấy phép nhạc: `giay-phep-nhac.txt` cạnh video. Phụ đề: `phu-de.srt`. Mỗi lần xuất thêm một bản trong `xuat/`.
+
+## Phần còn lại của hướng dẫn cũ
+
+
 
 ## Mở tool
 
@@ -32,6 +72,6 @@ Tool này chạy trên máy bạn. Nó biến một ý tưởng thành kịch b�
 - Cảnh giữa: một bước ngoặt nhìn thấy được.
 - Cảnh cuối: một hình đứng lại lâu hơn lời nói.
 
-Thể loại **Trẻ em: vui chơi, học tiếng Anh** vẽ nhân vật hoạt hình 3D, không phải ảnh người thật. Mỗi cảnh có hai tư thế. Khi dựng video, hai tư thế đổi qua lại nên thấy được vẫy tay, vỗ tay, nhảy, chạy. Phụ đề dạng `Hello! — Xin chào`. Nhạc nền là liên khúc thiếu nhi do tool tự đánh từ giai điệu đã hết bản quyền. Mỗi cảnh mất khoảng 80 giây vì phải vẽ hai ảnh. Bấm mẫu **Học tiếng Anh** để thử.
+Giao diện là **AI Kids Video Studio**: kịch bản bên trái, storyboard ở giữa, cảnh đang chọn bên phải, timeline phía dưới. Thể loại gồm truyện giáo dục, học màu và số, động vật, kỹ năng sống, phiêu lưu nhẹ, bài hát và học tiếng Anh. Nhân vật là hoạt hình 3D. Mỗi cảnh hai tư thế nên video thấy được động tác. Nhạc là giai điệu dân gian tool tự đánh, tự nhỏ khi có lời, và có file `giay-phep-nhac.txt`. Phụ đề xuất thêm file `phu-de.srt`. Mỗi lần xuất giữ một bản trong thư mục `xuat`, không ghi đè bản cũ.
 
 Bốn ý để thử ngay trên giao diện: **Mưa và xe ôm**, **Ghế còn ấm**, **Thang máy kẹt**, **Học tiếng Anh**.

@@ -12,7 +12,13 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
+from studio.adapters.pollinations import edit_image, key_ready
 from studio.specs import GEN_SIZE, craft_visual_prompt
+
+FOLLOW = (
+    "Edit this picture. Keep the exact same animals, colors, clothes, sizes and the same garden background. "
+    "Do not add or remove animals. Keep every animal fully inside the frame. Change only the action: "
+)
 
 FONT = Path(r"C:\Windows\Fonts\segoeui.ttf")
 FONT_BOLD = Path(r"C:\Windows\Fonts\segoeuib.ttf")
@@ -137,29 +143,55 @@ def create_scene_image(
     seed: int,
     fallback_text: str,
     pose_b: str = "",
+    pose_c: str = "",
 ) -> dict:
-    width, height = GEN_SIZE.get(aspect, GEN_SIZE["16:9"])
+    width, height = GEN_SIZE["9:16"]
     folder.mkdir(parents=True, exist_ok=True)
     dest = folder / f"scene_{index:02d}.jpg"
-    second = folder / f"scene_{index:02d}_b.jpg"
-    if second.exists():
-        second.unlink()
+    for extra in (folder / f"scene_{index:02d}_b.jpg", folder / f"scene_{index:02d}_c.jpg"):
+        if extra.exists():
+            extra.unlink()
+    master = folder / "scene_01.jpg"
+    if index > 1:
+        if not master.is_file():
+            return {
+                "file": dest.name,
+                "placeholder": True,
+                "error": "Hãy tạo ảnh cảnh 1 trước. Cảnh sau bám ảnh đó.",
+                "needs_key": False,
+                "followed": False,
+                "motion": False,
+            }
+        if not key_ready():
+            return {
+                "file": dest.name,
+                "placeholder": False,
+                "error": "Cảnh sau cần khóa Pollinations để sửa từ ảnh cảnh 1, không vẽ nhân vật mới.",
+                "needs_key": True,
+                "followed": False,
+                "motion": False,
+            }
+        try:
+            print(f"Cảnh {index} đang bám ảnh cảnh 1.", flush=True)
+            edit_image(master, FOLLOW + (prompt or fallback_text), dest)
+        except Exception as exc:
+            print(f"Ảnh cảnh {index} lỗi: {exc}", flush=True)
+            return {
+                "file": dest.name,
+                "placeholder": not dest.is_file(),
+                "error": str(exc),
+                "needs_key": False,
+                "followed": False,
+                "motion": False,
+            }
+        return {"file": dest.name, "placeholder": False, "needs_key": False, "followed": True, "motion": False}
     if "photorealistic" in prompt.lower() or "3d animated" in prompt.lower():
         style = ""
     final_prompt = craft_visual_prompt(prompt, style, lock, motion=False)
     with _IMAGE_LOCK:
         error = _download_image(final_prompt, dest, seed, width, height)
-        motion = False
-        if error is None and pose_b.strip():
-            second_prompt = craft_visual_prompt(pose_b, style, lock, motion=False)
-            second_error = _download_image(second_prompt, second, seed + 17, width, height)
-            motion = second_error is None
-            if second_error:
-                print(f"Tư thế 2 cảnh {index} lỗi: {second_error}", flush=True)
-                if second.exists():
-                    second.unlink()
         if error is None:
-            return {"file": dest.name, "placeholder": False, "motion": motion}
+            return {"file": dest.name, "placeholder": False, "needs_key": False, "followed": False, "motion": False}
     print(f"Ảnh cảnh {index} lỗi: {error}", flush=True)
     write_placeholder(dest, width, height, f"Cảnh {index}", fallback_text or prompt)
-    return {"file": dest.name, "placeholder": True, "error": error, "motion": False}
+    return {"file": dest.name, "placeholder": True, "error": error, "needs_key": False, "followed": False, "motion": False}
