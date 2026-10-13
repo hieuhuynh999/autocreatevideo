@@ -73,6 +73,8 @@
     .left-actions { display: flex; gap: 8px; margin-top: 8px; }
     .left-actions button { flex: 1; }
     .note { font-size: 12px; color: var(--muted); line-height: 1.4; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; }
+    .check input { width: auto; }
     .center { display: flex; flex-direction: column; gap: 12px; }
     video { display: block; width: min(100%, 280px); max-height: 70vh; margin: 0 auto; background: #1c1915; border-radius: 16px; }
     .strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
@@ -113,7 +115,7 @@
       <button class="primary" id="render" type="button" disabled>Xem trước</button>
     </div>
   </header>
-  <p class="status" id="status">Bấm Kịch bản mẫu, rồi Tạo ảnh, Tạo chuyển động, Xem trước. Video 1080×1920, phụ đề tiếng Anh hiện từng từ màu vàng.</p>
+  <p class="status" id="status">Bấm Kịch bản mẫu, rồi Tạo ảnh, Tạo chuyển động, Xem trước. Video 1080×1920. Chọn nhạc và kiểu phụ đề ở cột trái.</p>
   <ol class="steps" id="steps"></ol>
   <main class="workspace">
     <aside class="panel left">
@@ -142,6 +144,17 @@
           </select>
         </div>
       </div>
+      <label class="check" for="musicOn"><input id="musicOn" type="checkbox" checked> Nhạc nền</label>
+      <label for="musicKind">Bài nhạc</label>
+      <select id="musicKind">
+        <option value="thieu-nhi">Thiếu nhi</option>
+        <option value="ru-con">Quê: Ru con</option>
+        <option value="ly-ngua-o">Quê: Lý ngựa ô</option>
+        <option value="co-la">Quê: Cò lả</option>
+      </select>
+      <p class="note">Nhạc quê do tool tự đánh từ dân ca khuyết danh, không dùng bản thu của ca sĩ.</p>
+      <label class="check" for="captionEn"><input id="captionEn" type="checkbox" checked> Phụ đề tiếng Anh hiện từng từ</label>
+      <p class="note">Bỏ chọn nếu chuyện chỉ cần một dòng tiếng Việt.</p>
       <label for="lock">Hồ sơ nhân vật</label>
       <textarea id="lock">the same 3D animated child Mi, about 5, round face, big eyes, yellow t-shirt, blue shorts, white sneakers, fully clothed, same face and clothes</textarea>
       <div id="keyBox">
@@ -366,7 +379,11 @@
 
     $("render").addEventListener("click", async () => {
       $("render").disabled = true;
-      say("Đang dựng bằng Remotion: lời đọc, nhạc và phụ đề vàng từng từ…");
+      const englishCaption = $("captionEn").checked;
+      const music = $("musicOn").checked ? $("musicKind").value : "none";
+      say(englishCaption
+        ? "Đang dựng: lời đọc, nhạc và phụ đề tiếng Anh từng từ…"
+        : "Đang dựng: lời đọc, nhạc và một dòng tiếng Việt…");
       try {
         const data = await post("/api/render", {
           sid: state.sid,
@@ -375,16 +392,18 @@
           lock: $("lock").value,
           style: "3D animated",
           aspect: "9:16",
-          ambient: true,
+          ambient: music !== "none",
+          music: music,
+          caption: englishCaption ? "bilingual" : "vi",
           voice: true,
-          kids: true,
+          kids: englishCaption,
           frame: "caption",
           scenes: state.scenes
         });
         $("player").src = data.video;
         $("player").play().catch(() => {});
         const made = data.renderer === "remotion"
-          ? "Dựng bằng Remotion, phụ đề tiếng Anh hiện từng từ. "
+          ? (englishCaption ? "Phụ đề tiếng Anh hiện từng từ. " : "Một dòng tiếng Việt. ")
           : "";
         $("previewNote").textContent = made + (data.motion === "video"
           ? "Đã có chuyển động của nhân vật. File " + data.export

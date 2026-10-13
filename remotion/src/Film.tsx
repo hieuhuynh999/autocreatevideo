@@ -39,18 +39,20 @@ export type FilmProps = {
   intro: number;
   outro: number;
   music: string;
+  musicVolume: number;
   titleAudio: string;
   fonts: boolean;
+  captionMode: "bilingual" | "vi";
   scenes: SceneProps[];
 };
 
 export function filmFrames(props: FilmProps): number {
-  const intro = Math.max(1, Math.round((props.intro || 2.6) * FPS));
-  const outro = Math.max(1, Math.round((props.outro || 2.2) * FPS));
+  const intro = Math.max(0, Math.round((props.intro || 0) * FPS));
+  const outro = Math.max(0, Math.round((props.outro || 0) * FPS));
   const body = (props.scenes || []).reduce((sum, scene) => {
     return sum + Math.max(1, Math.round((scene.duration || 4) * FPS));
   }, 0);
-  return intro + body + outro;
+  return Math.max(1, intro + body + outro);
 }
 
 const fontStack = "Kids, Segoe UI, sans-serif";
@@ -140,7 +142,36 @@ const Picture: React.FC<{ scene: SceneProps }> = ({ scene }) => {
   );
 };
 
-const SceneCard: React.FC<{ scene: SceneProps; title: string }> = ({ scene, title }) => {
+const VietnameseLine: React.FC<{ scene: SceneProps }> = ({ scene }) => {
+  const text = scene.lineVi || scene.lineEn;
+  const size = Math.max(40, Math.min(54, Math.floor(980 / Math.max(text.length, 16))));
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        padding: "120px 56px 72px",
+        background: "linear-gradient(transparent, rgba(8, 16, 20, 0.86))",
+        textAlign: "center",
+        fontFamily: fontStack,
+        fontWeight: 700,
+        fontSize: size,
+        lineHeight: 1.35,
+        color: "#fff8ec",
+      }}
+    >
+      {text}
+    </div>
+  );
+};
+
+const SceneCard: React.FC<{ scene: SceneProps; title: string; captionMode: "bilingual" | "vi" }> = ({
+  scene,
+  title,
+  captionMode,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const spokenAt = frame / fps - scene.audioDelay;
@@ -151,6 +182,14 @@ const SceneCard: React.FC<{ scene: SceneProps; title: string }> = ({ scene, titl
     }
   });
   const size = Math.max(34, Math.min(54, Math.floor(860 / Math.max(scene.lineEn.length, 12))));
+  if (captionMode === "vi") {
+    return (
+      <AbsoluteFill>
+        <Picture scene={scene} />
+        <VietnameseLine scene={scene} />
+      </AbsoluteFill>
+    );
+  }
   return (
     <AbsoluteFill>
       <div
@@ -239,13 +278,16 @@ export const KidsFilm: React.FC<FilmProps> = ({
   intro,
   outro,
   music,
+  musicVolume,
   titleAudio,
   fonts,
+  captionMode,
   scenes,
 }) => {
   const { fps } = useVideoConfig();
-  let cursor = Math.max(1, Math.round(intro * fps));
-  const outroFrames = Math.max(1, Math.round(outro * fps));
+  const introFrames = Math.max(0, Math.round((intro || 0) * fps));
+  const outroFrames = Math.max(0, Math.round((outro || 0) * fps));
+  let cursor = introFrames;
   return (
     <AbsoluteFill style={{ backgroundColor: "#102833" }}>
       {fonts ? (
@@ -255,10 +297,12 @@ export const KidsFilm: React.FC<FilmProps> = ({
         </style>
       ) : null}
       <Backdrop />
-      <Sequence from={0} durationInFrames={cursor}>
-        <TitleCard kicker="PHIM NGẮN" title={title} logline={logline} />
-      </Sequence>
-      {titleAudio ? (
+      {introFrames > 0 ? (
+        <Sequence from={0} durationInFrames={introFrames}>
+          <TitleCard kicker="PHIM NGẮN" title={title} logline={logline} />
+        </Sequence>
+      ) : null}
+      {titleAudio && introFrames > 0 ? (
         <Sequence from={Math.round(0.25 * fps)}>
           <Audio src={staticFile(titleAudio)} />
         </Sequence>
@@ -270,7 +314,7 @@ export const KidsFilm: React.FC<FilmProps> = ({
         return (
           <React.Fragment key={index}>
             <Sequence from={from} durationInFrames={frames}>
-              <SceneCard scene={scene} title={title} />
+              <SceneCard scene={scene} title={title} captionMode={captionMode || "bilingual"} />
             </Sequence>
             {scene.audio ? (
               <Sequence from={from + Math.round(scene.audioDelay * fps)}>
@@ -280,10 +324,12 @@ export const KidsFilm: React.FC<FilmProps> = ({
           </React.Fragment>
         );
       })}
-      <Sequence from={cursor} durationInFrames={outroFrames}>
-        <TitleCard kicker="HẾT" title={title} logline="" />
-      </Sequence>
-      {music ? <Audio src={staticFile(music)} volume={0.22} /> : null}
+      {outroFrames > 0 ? (
+        <Sequence from={cursor} durationInFrames={outroFrames}>
+          <TitleCard kicker="HẾT" title={title} logline="" />
+        </Sequence>
+      ) : null}
+      {music ? <Audio src={staticFile(music)} volume={musicVolume || 0.2} /> : null}
     </AbsoluteFill>
   );
 };

@@ -5,11 +5,13 @@ import { FilmProps, KidsFilm, filmFrames } from "./Film";
 const defaults: FilmProps = {
   title: "Phim ngắn",
   logline: "",
-  intro: 2.6,
-  outro: 2.2,
+  intro: 0,
+  outro: 0,
   music: "",
+  musicVolume: 0.2,
   titleAudio: "",
   fonts: false,
+  captionMode: "bilingual",
   scenes: [],
 };
 

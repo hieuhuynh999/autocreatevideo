@@ -10,8 +10,8 @@ import subprocess
 import threading
 from pathlib import Path
 
-INTRO = 2.6
-OUTRO = 2.2
+INTRO = 0.0
+OUTRO = 0.0
 AUDIO_DELAY = 0.15
 ROOT = Path(__file__).resolve().parents[1] / "remotion"
 PUBLIC = ROOT / "public" / "job"
@@ -125,10 +125,9 @@ def _export_locked(
     cli: Path,
 ) -> dict:
     from studio.images import write_placeholder
-    from studio.nursery import write_nursery
+    from studio.musicbed import license_lines, normalize, write_bed
     from studio.render import _fit_voice, _media_duration, _write_srt
     from studio.specs import ASPECTS, PHONE_ASPECT
-    from studio.voice import synthesize_timed
 
     width, height = ASPECTS[PHONE_ASPECT]
     scenes = payload.get("scenes") or []
@@ -149,6 +148,7 @@ def _export_locked(
     srt_rows: list[tuple[float, float, str]] = []
     cursor = INTRO
     want_voice = bool(payload.get("voice", True))
+    vietnamese_only = payload.get("caption") == "vi"
     for position, scene in enumerate(scenes):
         index = int(scene.get("index") or position + 1)
         duration = float(lengths[position])
@@ -179,10 +179,10 @@ def _export_locked(
             video_name = f"job/scene-{index:02d}.mp4"
             video_seconds = _media_duration(clip) or duration
 
-        line_en = str(scene.get("line_en") or "").strip()
-        line_vi = str(scene.get("line_vi") or scene.get("subtitle") or "").strip()
+        line_en = "" if vietnamese_only else str(scene.get("line_en") or "").strip()
+        line_vi = str(scene.get("line_vi") or scene.get("subtitle") or scene.get("dialogue") or "").strip()
         marks = word_marks[position] if position < len(word_marks) else []
-        if not line_en and marks:
+        if not vietnamese_only and not line_en and marks:
             line_en = " ".join(str(item.get("text") or "") for item in marks if str(item.get("text") or "").strip())
         audio_name = ""
         words: list[dict] = []
@@ -201,8 +201,8 @@ def _export_locked(
                 }
                 for item in marks
             ]
-            words = align_caption(line_en, scaled, duration)
-        elif line_en:
+            words = [] if vietnamese_only else align_caption(line_en, scaled, duration)
+        elif line_en and not vietnamese_only:
             words = align_caption(line_en, [], duration)
 
         scene_props.append(
@@ -218,21 +218,19 @@ def _export_locked(
                 "audioDelay": AUDIO_DELAY,
             }
         )
-        caption = " — ".join(part for part in (line_en, line_vi) if part) or str(scene.get("subtitle") or "").strip()
+        caption = line_vi if vietnamese_only else (
+            " — ".join(part for part in (line_en, line_vi) if part) or str(scene.get("subtitle") or "").strip()
+        )
         if caption:
             srt_rows.append((cursor + AUDIO_DELAY, max(cursor + AUDIO_DELAY + 0.4, cursor + duration - 0.05), caption))
         cursor += duration
 
     total = cursor + OUTRO
+    tune = normalize(str(payload.get("music") or ("thieu-nhi" if payload.get("ambient", True) else "none")))
     music_name = ""
-    if payload.get("ambient", True):
-        write_nursery(PUBLIC / "music.wav", total)
+    if write_bed(PUBLIC / "music.wav", max(total, 1), tune):
         music_name = "job/music.wav"
     title_audio = ""
-    if want_voice:
-        spoken_title, _unused = synthesize_timed(title, PUBLIC / "title.mp3")
-        if spoken_title is not None:
-            title_audio = f"job/{spoken_title.name}"
 
     props = {
         "title": title,
@@ -240,8 +238,10 @@ def _export_locked(
         "intro": INTRO,
         "outro": OUTRO,
         "music": music_name,
+        "musicVolume": 0.16 if tune not in {"none", "thieu-nhi"} else 0.22,
         "titleAudio": title_audio,
         "fonts": fonts,
+        "captionMode": "vi" if vietnamese_only else "bilingual",
         "scenes": scene_props,
     }
     props_path = (folder / "remotion-props.json").resolve()
@@ -279,19 +279,9 @@ def _export_locked(
 
     srt = folder / "phu-de.srt"
     _write_srt(srt, srt_rows)
-    if payload.get("ambient", True):
-        (folder / "giay-phep-nhac.txt").write_text(
-            "\n".join(
-                [
-                    "Nhạc: Liên khúc thiếu nhi dân gian",
-                    "Tác phẩm: Twinkle Twinkle Little Star; Mary Had a Little Lamb; Frère Jacques",
-                    "Giấy phép: giai điệu thuộc phạm vi công cộng. File này do tool tự đánh, không phải bản thu của ca sĩ.",
-                    "Được dùng trong video đã xuất. Không cam kết phần mềm nhận diện nhạc sẽ bỏ qua.",
-                    "Ngày kiểm tra: 2026-10-13",
-                ]
-            ),
-            encoding="utf-8",
-        )
+    lines = license_lines(tune)
+    if lines:
+        (folder / "giay-phep-nhac.txt").write_text("\n".join(lines), encoding="utf-8")
     exports = folder / "xuat"
     exports.mkdir(exist_ok=True)
     version = len(list(exports.glob("phim-*.mp4"))) + 1

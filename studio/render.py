@@ -438,7 +438,7 @@ def _add_soundtrack(
     duration: float,
     cues: list[tuple[Path, float]],
     music: bool,
-    bright: bool,
+    tune: str,
     work: Path,
 ) -> None:
     args = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
@@ -454,14 +454,15 @@ def _add_soundtrack(
         filters.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:normalize=0[speech]")
     if music:
         fade_out = max(0.3, duration - 1.2)
-        if bright:
-            from studio.nursery import write_nursery
+        from studio.musicbed import write_bed
 
-            song = write_nursery(work / "nhac_thieu_nhi.wav", duration)
+        song = write_bed(work / "nhac_nen.wav", duration, tune)
+        if song:
             args.extend(["-i", str(song)])
+            gain = "0.28" if tune != "thieu-nhi" else "0.42"
             bed = (
-                f"volume=0.42,afade=t=in:st=0:d=0.35,"
-                f"afade=t=out:st={fade_out:.2f}:d=1.0"
+                f"volume={gain},afade=t=in:st=0:d=0.6,"
+                f"afade=t=out:st={fade_out:.2f}:d=1.2"
             )
         else:
             args.extend(["-f", "lavfi", "-i", _music_graph(duration, False)])
@@ -548,12 +549,6 @@ def render_film(folder: Path, payload: dict) -> dict:
     _prompt_pack(folder, title, logline, lock, style, scenes)
 
     clips: list[Path] = []
-    title_still = work / "title.jpg"
-    _card(title_still, width * 2, height * 2, "Phim ngắn", title, logline)
-    _subtitle_png(work / "title.png", "", width, height)
-    title_clip = work / "title.mp4"
-    _clip(title_still, work / "title.png", title_clip, width, height, int(3.2 * FPS), "in")
-    clips.append(title_clip)
 
     want_voice = bool(payload.get("voice", True))
     warnings: list[str] = []
@@ -591,7 +586,8 @@ def render_film(folder: Path, payload: dict) -> dict:
         shutil.rmtree(work, ignore_errors=True)
         return remotion_result
 
-    total_frames = int(3.2 * FPS)
+    total_frames = 0
+    vietnamese_only = payload.get("caption") == "vi"
     used_motion = False
     used_stock = False
     for position, scene in enumerate(scenes):
@@ -604,7 +600,9 @@ def render_film(folder: Path, payload: dict) -> dict:
         still = work / f"still_{index:02d}.jpg"
         sub = work / f"sub_{index:02d}.png"
         clip = work / f"clip_{index:02d}.mp4"
-        caption = str(scene.get("subtitle") or scene.get("dialogue") or "").strip()
+        line_vi = str(scene.get("line_vi") or scene.get("subtitle") or scene.get("dialogue") or "").strip()
+        line_en = "" if vietnamese_only else str(scene.get("line_en") or "").strip()
+        caption = line_vi if vietnamese_only else (str(scene.get("subtitle") or scene.get("dialogue") or line_vi).strip())
         _subtitle_png(sub, caption, width, height)
         wan_file = folder / f"scene_{index:02d}_motion.mp4"
         stock_file = folder / f"scene_{index:02d}_stock.mp4"
@@ -625,9 +623,9 @@ def render_film(folder: Path, payload: dict) -> dict:
                 height,
                 frames,
                 sub,
-                title,
-                str(scene.get("line_en") or ""),
-                str(scene.get("line_vi") or caption),
+                "" if vietnamese_only else title,
+                line_en,
+                line_vi or caption,
                 str(payload.get("frame") or "full"),
             )
             clips.append(clip)
@@ -651,9 +649,9 @@ def render_film(folder: Path, payload: dict) -> dict:
                     framed_path,
                     width,
                     height,
-                    title,
-                    str(scene.get("line_en") or ""),
-                    str(scene.get("line_vi") or caption),
+                    "" if vietnamese_only else title,
+                    line_en,
+                    line_vi or caption,
                 )
                 framed.append(framed_path)
             _hold_sequence(framed, clip, work, width, height, frames)
@@ -663,15 +661,6 @@ def render_film(folder: Path, payload: dict) -> dict:
         clips.append(clip)
         total_frames += frames
 
-    end_still = work / "end.jpg"
-    _card(end_still, width * 2, height * 2, "Hết", title, logline)
-    _subtitle_png(work / "end.png", "", width, height)
-    end_clip = work / "end.mp4"
-    end_frames = int(2.8 * FPS)
-    _clip(end_still, work / "end.png", end_clip, width, height, end_frames, "out")
-    clips.append(end_clip)
-    total_frames += end_frames
-
     silent = work / "silent.mp4"
     _concat(clips, silent, work / "list.txt")
     final = folder / "phim.mp4"
@@ -679,12 +668,8 @@ def render_film(folder: Path, payload: dict) -> dict:
     want_music = bool(payload.get("ambient", True))
     cues: list[tuple[Path, float]] = []
     srt_rows: list[tuple[float, float, str]] = []
-    title_len = int(3.2 * FPS) / FPS
     if want_voice:
-        spoken_title = synthesize(title, work / "voice_title.mp3")
-        if spoken_title:
-            cues.append((_fit_voice(spoken_title, work / "voice_title_fit.wav", max(0.8, title_len - 0.5)), 0.25))
-        cursor = title_len
+        cursor = 0.0
         for position, scene in enumerate(scenes):
             scene_len = int(lengths[position] * FPS) / FPS
             audio = spoken[position]
@@ -696,10 +681,12 @@ def render_film(folder: Path, payload: dict) -> dict:
                 if caption:
                     srt_rows.append((start, min(cursor + scene_len - 0.05, start + _media_duration(fitted)), caption))
             cursor += scene_len
-    bright = bool(payload.get("kids")) or "tiếng Anh" in title or any("—" in str(scene.get("subtitle") or "") for scene in scenes)
-    if cues or want_music:
+    from studio.musicbed import license_lines, normalize
+
+    tune = normalize(str(payload.get("music") or ("thieu-nhi" if want_music else "none")))
+    if cues or tune != "none":
         try:
-            _add_soundtrack(silent, final, duration, cues, want_music, bright, work)
+            _add_soundtrack(silent, final, duration, cues, tune != "none", tune, work)
         except RuntimeError as exc:
             print(f"Không trộn được tiếng: {exc}", flush=True)
             shutil.copyfile(silent, final)
@@ -712,19 +699,9 @@ def render_film(folder: Path, payload: dict) -> dict:
         )
     srt = folder / "phu-de.srt"
     _write_srt(srt, srt_rows)
-    if bright and want_music:
-        (folder / "giay-phep-nhac.txt").write_text(
-            "\n".join(
-                [
-                    "Nhạc: Liên khúc thiếu nhi dân gian",
-                    "Tác phẩm: Twinkle Twinkle Little Star; Mary Had a Little Lamb; Frère Jacques",
-                    "Giấy phép: giai điệu thuộc phạm vi công cộng. File này do tool tự đánh, không phải bản thu của ca sĩ.",
-                    "Được dùng trong video đã xuất. Không cam kết phần mềm nhận diện nhạc sẽ bỏ qua.",
-                    "Ngày kiểm tra: 2026-10-12",
-                ]
-            ),
-            encoding="utf-8",
-        )
+    note = license_lines(tune)
+    if note:
+        (folder / "giay-phep-nhac.txt").write_text("\n".join(note), encoding="utf-8")
     exports = folder / "xuat"
     exports.mkdir(exist_ok=True)
     version = len(list(exports.glob("phim-*.mp4"))) + 1
