@@ -96,26 +96,61 @@ def _to_wav(pieces: list[Path], dest: Path) -> None:
     )
 
 
-def synthesize(text: str, dest: Path) -> Path | None:
-    """Ghi một file wav. Trả về None nếu không đọc được câu này."""
-    parts = spoken_parts(text)
-    if not parts:
-        return None
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    pieces: list[Path] = []
-    for index, (line, voice) in enumerate(parts):
-        piece = dest.with_name(f"{dest.stem}_{index}.mp3")
+def _piece_duration(path: Path) -> float:
+    process = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", process.stderr or "")
+    if not match:
+        return 0
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _edge_collect(text: str, voice: str, dest: Path) -> list[dict]:
+    """Tải lời đọc và mốc từng từ. Mốc tính bằng giây trong file của đoạn này."""
+    import edge_tts
+
+    async def run() -> list[dict]:
+        clip = edge_tts.Communicate(text, voice, rate="-8%", boundary="WordBoundary")
+        words: list[dict] = []
+        audio = bytearray()
+        async for chunk in clip.stream():
+            kind = chunk["type"]
+            if kind == "audio":
+                audio.extend(chunk["data"])
+            elif kind == "WordBoundary":
+                start = float(chunk["offset"]) / 10_000_000
+                end = start + float(chunk["duration"]) / 10_000_000
+                token = str(chunk.get("text") or "").strip()
+                if token:
+                    words.append({"text": token, "start": start, "end": end})
+        if not audio:
+            raise RuntimeError("Không nhận được tiếng đọc.")
+        dest.write_bytes(bytes(audio))
+        return words
+
+    return asyncio.run(run())
+
+
+def _save_piece(line: str, voice: str, piece: Path) -> list[dict]:
+    try:
+        return _edge_collect(line, voice, piece)
+    except Exception:
         try:
             _edge_save(line, voice, piece)
         except Exception:
             if VIETNAMESE.search(line):
-                continue
-            try:
-                _sapi_save(line, piece)
-            except Exception:
-                continue
-        if piece.is_file() and piece.stat().st_size > 400:
-            pieces.append(piece)
+                return []
+            _sapi_save(line, piece)
+        return []
+
+
+def _join_speech(dest: Path, pieces: list[Path]) -> Path | None:
     if not pieces:
         return None
     wav = dest.with_suffix(".wav")
@@ -126,3 +161,40 @@ def synthesize(text: str, dest: Path) -> Path | None:
     if wav.is_file() and wav.stat().st_size > 400:
         return wav
     return None
+
+
+def synthesize(text: str, dest: Path) -> Path | None:
+    """Ghi một file wav. Trả về None nếu không đọc được câu này."""
+    audio, _words = synthesize_timed(text, dest)
+    return audio
+
+
+def synthesize_timed(text: str, dest: Path) -> tuple[Path | None, list[dict]]:
+    """Ghi wav và mốc từ tiếng Anh, để phụ đề vàng chạy đúng nhịp lời đọc."""
+    parts = spoken_parts(text)
+    if not parts:
+        return None, []
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    pieces: list[Path] = []
+    words: list[dict] = []
+    offset = 0.0
+    for index, (line, voice) in enumerate(parts):
+        piece = dest.with_name(f"{dest.stem}_{index}.mp3")
+        try:
+            piece_words = _save_piece(line, voice, piece)
+        except Exception:
+            continue
+        if not piece.is_file() or piece.stat().st_size <= 400:
+            continue
+        if voice == VOICE_EN:
+            for item in piece_words:
+                words.append(
+                    {
+                        "text": item["text"],
+                        "start": round(item["start"] + offset, 3),
+                        "end": round(item["end"] + offset, 3),
+                    }
+                )
+        pieces.append(piece)
+        offset += _piece_duration(piece)
+    return _join_speech(dest, pieces), words

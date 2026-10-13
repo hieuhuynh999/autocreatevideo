@@ -2,4 +2,9 @@ __pycache__/
 *.pyc
 output/
 studio/pollinations.key
+studio/pexels.key
+studio/pixabay.key
+studio/coverr.key
 .venv/
+remotion/node_modules/
+remotion/public/job/

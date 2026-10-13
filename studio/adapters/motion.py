@@ -7,6 +7,7 @@ from pathlib import Path
 
 from studio.adapters.free_video import generate as free_clip
 from studio.adapters.free_video import remaining
+from studio.adapters.stock_video import fill_stock, ready as stock_ready
 from studio.adapters.pollinations import edit_image, key_ready
 from studio.images import create_scene_image
 
@@ -108,7 +109,7 @@ def build_motion(
             except RuntimeError as exc:
                 print(f"Cảnh {index} chưa xong: {exc}", flush=True)
                 missed.append(index)
-                if "đã đủ 12" in str(exc):
+                if "đã đủ 12" in str(exc) or "Hết lượt GPU" in str(exc):
                     stopped = str(exc)
                     break
                 if "đang nghỉ" in str(exc):
@@ -119,6 +120,19 @@ def build_motion(
             time.sleep(8)
         if not missed:
             break
+        stock_notes: list[str] = []
+        if any(stock_ready().values()):
+            by_index = {
+                int(scene.get("index") or position + 1): scene
+                for position, scene in enumerate(scenes)
+            }
+            for index in missed:
+                stock_file = folder / f"scene_{index:02d}_stock.mp4"
+                if stock_file.is_file() and stock_file.stat().st_size > 1000:
+                    continue
+                source_name = fill_stock(by_index.get(index) or {}, stock_file)
+                if source_name:
+                    stock_notes.append(f"{index} ({source_name})")
         if stopped:
             missing = ", ".join(str(item) for item in missed)
             done = _ids(made)
@@ -130,15 +144,18 @@ def build_motion(
         wait = min(120, 40 + round_no * 10)
         missing = ", ".join(str(item) for item in missed)
         done = _ids(made)
+        stock_text = ""
+        if stock_notes:
+            stock_text = " Đã lấy video kho cho cảnh " + ", ".join(stock_notes) + ". Máy Wan vẫn được gọi lại để thay bằng đúng nhân vật."
         if done:
             note = (
                 f"Cảnh {done} đã có clip. Còn cảnh {missing}. "
-                f"Tool tự gọi tiếp sau {wait} giây, đến khi đủ mọi cảnh."
+                f"Tool tự gọi tiếp sau {wait} giây, đến khi đủ mọi cảnh.{stock_text}"
             )
         else:
             note = (
-                f"Chưa có clip. Cảnh {missing} máy đang bận. "
-                f"Tool tự gọi tiếp sau {wait} giây, đến khi đủ mọi cảnh."
+                f"Chưa có clip Wan. Cảnh {missing} máy đang bận. "
+                f"Tool tự gọi tiếp sau {wait} giây, đến khi đủ mọi cảnh.{stock_text}"
             )
         print(note, flush=True)
         if progress:

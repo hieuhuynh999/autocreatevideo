@@ -17,6 +17,8 @@ from studio.render import render_film, stitch_videos
 from studio.sample_story import sample_project
 from studio.adapters.motion import build_motion
 from studio.adapters.pollinations import key_ready, save_key
+from studio.adapters.stock_video import ready as stock_ready
+from studio.adapters.stock_video import save_key as save_stock_key
 from studio.screenplay import clean_idea, write_screenplay
 from studio.specs import ASPECTS, PHONE_ASPECT, MAX_SCENES, MAX_SECONDS, MIN_SECONDS
 
@@ -111,6 +113,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/api/key":
             self._json(200, {"ready": key_ready()})
             return
+        if path == "/api/stock-key":
+            self._json(200, stock_ready())
+            return
         if path == "/api/motion":
             sid = parse_qs(urlparse(self.path).query).get("sid", [""])[0]
             self._json(200, _motion_view(sid))
@@ -187,6 +192,11 @@ class StudioHandler(BaseHTTPRequestHandler):
             elif path == "/api/key":
                 save_key(str(data.get("key") or ""))
                 self._json(200, {"ready": True})
+            elif path == "/api/stock-key":
+                for name in ("pexels", "pixabay", "coverr"):
+                    if name in data:
+                        save_stock_key(name, str(data.get(name) or ""))
+                self._json(200, stock_ready())
             elif path == "/api/stitch":
                 self._stitch(data)
             else:
@@ -359,6 +369,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "srt": f"/output/{folder.name}/{result.get('srt', 'phu-de.srt')}",
                 "export": f"/output/{folder.name}/{result.get('export', 'phim.mp4')}",
                 "motion": result.get("motion") or "storyboard",
+                "renderer": result.get("renderer") or "ffmpeg",
             },
         )
 

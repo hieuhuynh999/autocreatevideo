@@ -113,7 +113,7 @@
       <button class="primary" id="render" type="button" disabled>Xem trước</button>
     </div>
   </header>
-  <p class="status" id="status">Bấm Kịch bản mẫu, rồi Tạo ảnh, Tạo chuyển động, Xem trước. Video ra 1080×1920.</p>
+  <p class="status" id="status">Bấm Kịch bản mẫu, rồi Tạo ảnh, Tạo chuyển động, Xem trước. Video 1080×1920, phụ đề tiếng Anh hiện từng từ màu vàng.</p>
   <ol class="steps" id="steps"></ol>
   <main class="workspace">
     <aside class="panel left">
@@ -150,6 +150,17 @@
         <button class="quiet" id="saveKey" type="button" style="margin-top:8px">Lưu khóa</button>
         <p class="note" id="keyState">Tạo khóa tại enter.pollinations.ai/keys. Chữ Pollinations không phải khóa.</p>
       </div>
+      <details>
+        <summary class="note">Khóa video kho miễn phí, không bắt buộc</summary>
+        <label for="pexelsKey">Pexels</label>
+        <input id="pexelsKey" type="password" placeholder="Khóa Pexels" autocomplete="off">
+        <label for="pixabayKey">Pixabay</label>
+        <input id="pixabayKey" type="password" placeholder="Khóa Pixabay" autocomplete="off">
+        <label for="coverrKey">Coverr</label>
+        <input id="coverrKey" type="password" placeholder="Khóa Coverr" autocomplete="off">
+        <button class="quiet" id="saveStock" type="button" style="margin-top:8px">Lưu khóa video kho</button>
+        <p class="note" id="stockState">Khi máy Wan bận, tool dùng video dọc từ khóa nào đã lưu. Clip Wan của đúng nhân vật vẫn được gọi lại và được ưu tiên.</p>
+      </details>
     </aside>
     <section class="center">
       <div class="panel">
@@ -355,7 +366,7 @@
 
     $("render").addEventListener("click", async () => {
       $("render").disabled = true;
-      say("Đang dựng lời đọc, phụ đề và nhạc…");
+      say("Đang dựng bằng Remotion: lời đọc, nhạc và phụ đề vàng từng từ…");
       try {
         const data = await post("/api/render", {
           sid: state.sid,
@@ -372,11 +383,20 @@
         });
         $("player").src = data.video;
         $("player").play().catch(() => {});
-        $("previewNote").textContent = data.motion === "video"
-          ? "Đã có chuyển động. File " + data.export
-          : "Đây là ảnh kể chuyện, chưa có clip chuyển động.";
+        const made = data.renderer === "remotion"
+          ? "Dựng bằng Remotion, phụ đề tiếng Anh hiện từng từ. "
+          : "";
+        $("previewNote").textContent = made + (data.motion === "video"
+          ? "Đã có chuyển động của nhân vật. File " + data.export
+          : data.motion === "stock"
+            ? "Máy tạo chuyển động chưa trả clip. Bản này dùng video kho cho cảnh còn thiếu."
+            : "Ảnh được lia nhẹ. Chưa có clip nhân vật cử động.");
         $("warnings").textContent = (data.warnings || []).join(" ");
-        const kind = data.motion === "video" ? "Có clip chuyển động." : "Chưa có clip chuyển động.";
+        const kind = data.motion === "video"
+          ? "Có clip chuyển động."
+          : data.motion === "stock"
+            ? "Đang dùng video kho cho cảnh máy Wan chưa trả."
+            : "Chưa có clip chuyển động.";
         mark("Xem trước", true, data.seconds + " giây. " + kind);
         saveLocal();
       } catch (error) {
@@ -448,6 +468,31 @@
 
     fetch("/api/key").then((response) => response.json()).then((data) => {
       if (data.ready) $("keyBox").hidden = true;
+    }).catch(() => {});
+
+    $("saveStock").addEventListener("click", async () => {
+      try {
+        const data = await post("/api/stock-key", {
+          pexels: $("pexelsKey").value,
+          pixabay: $("pixabayKey").value,
+          coverr: $("coverrKey").value
+        });
+        $("pexelsKey").value = "";
+        $("pixabayKey").value = "";
+        $("coverrKey").value = "";
+        const names = ["pexels", "pixabay", "coverr"].filter((name) => data[name]);
+        $("stockState").textContent = names.length
+          ? "Đã lưu: " + names.join(", ") + "."
+          : "Chưa có khóa video kho. Máy Wan vẫn được gọi.";
+        mark("Lưu khóa video kho", true, names.join(", ") || "Chưa lưu khóa nào.");
+      } catch (error) {
+        mark("Lưu khóa video kho", false, error.message);
+      }
+    });
+
+    fetch("/api/stock-key").then((response) => response.json()).then((data) => {
+      const names = ["pexels", "pixabay", "coverr"].filter((name) => data[name]);
+      if (names.length) $("stockState").textContent = "Đã có khóa: " + names.join(", ") + ".";
     }).catch(() => {});
 
     const saved = localStorage.getItem("kids-studio-draft");

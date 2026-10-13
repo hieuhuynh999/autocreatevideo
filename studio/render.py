@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from studio.images import write_placeholder
 from studio.specs import ASPECTS, PHONE_ASPECT, MAX_SECONDS, MIN_SECONDS, craft_visual_prompt
-from studio.voice import synthesize
+from studio.voice import synthesize, synthesize_timed
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 FPS = 24
@@ -558,10 +558,11 @@ def render_film(folder: Path, payload: dict) -> dict:
     want_voice = bool(payload.get("voice", True))
     warnings: list[str] = []
     spoken: list[Path | None] = []
+    word_marks: list[list[dict]] = []
     lengths: list[float] = []
     for position, scene in enumerate(scenes):
         duration = min(MAX_SECONDS, max(MIN_SECONDS, float(scene.get("duration") or 6)))
-        audio = synthesize(_narration(scene), work / f"voice_{position:02d}.mp3") if want_voice else None
+        audio, marks = synthesize_timed(_narration(scene), work / f"voice_{position:02d}.mp3") if want_voice else (None, [])
         if audio:
             need = _media_duration(audio) + 0.55
             if need > duration + 0.15:
@@ -573,10 +574,26 @@ def render_film(folder: Path, payload: dict) -> dict:
                         f"Cảnh {position + 1} có câu dài hơn {int(MAX_SECONDS)} giây. Lời được đọc nhanh hơn một chút, không bị cắt cụt."
                     )
         spoken.append(audio)
+        word_marks.append(marks)
         lengths.append(duration)
+
+    from studio.remotion_export import export_remotion
+
+    try:
+        remotion_result = export_remotion(
+            folder, payload, spoken, word_marks, lengths, warnings, title, logline
+        )
+    except Exception as exc:
+        print(f"Remotion: {exc}", flush=True)
+        warnings.append("Remotion chưa xuất được, nên bản này dựng theo cách cũ.")
+        remotion_result = None
+    if remotion_result:
+        shutil.rmtree(work, ignore_errors=True)
+        return remotion_result
 
     total_frames = int(3.2 * FPS)
     used_motion = False
+    used_stock = False
     for position, scene in enumerate(scenes):
         index = int(scene.get("index") or position + 1)
         duration = lengths[position]
@@ -589,11 +606,19 @@ def render_film(folder: Path, payload: dict) -> dict:
         clip = work / f"clip_{index:02d}.mp4"
         caption = str(scene.get("subtitle") or scene.get("dialogue") or "").strip()
         _subtitle_png(sub, caption, width, height)
-        motion_file = folder / f"scene_{index:02d}_motion.mp4"
-        if motion_file.is_file():
+        wan_file = folder / f"scene_{index:02d}_motion.mp4"
+        stock_file = folder / f"scene_{index:02d}_stock.mp4"
+        clip_file = None
+        if wan_file.is_file() and wan_file.stat().st_size > 1000:
+            clip_file = wan_file
             used_motion = True
+        elif stock_file.is_file() and stock_file.stat().st_size > 1000:
+            clip_file = stock_file
+            used_stock = True
+            warnings.append(f"Cảnh {index} đang dùng video kho vì máy tạo chuyển động chưa trả clip.")
+        if clip_file:
             _place_motion(
-                motion_file,
+                clip_file,
                 clip,
                 work,
                 width,
@@ -712,7 +737,8 @@ def render_film(folder: Path, payload: dict) -> dict:
         "warnings": warnings,
         "srt": srt.name,
         "export": f"xuat/{archived.name}",
-        "motion": "video" if used_motion else "storyboard",
+        "motion": "video" if used_motion else "stock" if used_stock else "storyboard",
+        "renderer": "ffmpeg",
     }
 
 
