@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 output/
 studio/pollinations.key
+studio/gemini.key
 studio/pexels.key
 studio/pixabay.key
 studio/coverr.key

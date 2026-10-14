@@ -3,7 +3,6 @@ import {
   AbsoluteFill,
   Audio,
   Img,
-  Loop,
   OffthreadVideo,
   Sequence,
   interpolate,
@@ -23,6 +22,7 @@ export type WordCue = {
 
 export type SceneProps = {
   duration: number;
+  frames?: number;
   image: string;
   video: string;
   videoSeconds: number;
@@ -43,15 +43,21 @@ export type FilmProps = {
   titleAudio: string;
   fonts: boolean;
   captionMode: "bilingual" | "vi";
+  reel?: string;
   scenes: SceneProps[];
 };
+
+export function sceneFrames(scene: SceneProps): number {
+  if (scene.frames && scene.frames > 0) {
+    return scene.frames;
+  }
+  return Math.max(1, Math.round((scene.duration || 4) * FPS));
+}
 
 export function filmFrames(props: FilmProps): number {
   const intro = Math.max(0, Math.round((props.intro || 0) * FPS));
   const outro = Math.max(0, Math.round((props.outro || 0) * FPS));
-  const body = (props.scenes || []).reduce((sum, scene) => {
-    return sum + Math.max(1, Math.round((scene.duration || 4) * FPS));
-  }, 0);
+  const body = (props.scenes || []).reduce((sum, scene) => sum + sceneFrames(scene), 0);
   return Math.max(1, intro + body + outro);
 }
 
@@ -119,15 +125,13 @@ const Picture: React.FC<{ scene: SceneProps }> = ({ scene }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   if (scene.video) {
-    const videoFrames = Math.max(1, Math.round((scene.videoSeconds || scene.duration) * fps));
     return (
-      <Loop durationInFrames={videoFrames}>
-        <OffthreadVideo
-          src={staticFile(scene.video)}
-          muted
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </Loop>
+      <OffthreadVideo
+        key={scene.video}
+        src={staticFile(scene.video)}
+        muted
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      />
     );
   }
   const scale = interpolate(frame, [0, Math.max(1, durationInFrames - 1)], [1.04, 1.12], {
@@ -142,36 +146,10 @@ const Picture: React.FC<{ scene: SceneProps }> = ({ scene }) => {
   );
 };
 
-const VietnameseLine: React.FC<{ scene: SceneProps }> = ({ scene }) => {
-  const text = scene.lineVi || scene.lineEn;
-  const size = Math.max(40, Math.min(54, Math.floor(980 / Math.max(text.length, 16))));
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        padding: "120px 56px 72px",
-        background: "linear-gradient(transparent, rgba(8, 16, 20, 0.86))",
-        textAlign: "center",
-        fontFamily: fontStack,
-        fontWeight: 700,
-        fontSize: size,
-        lineHeight: 1.35,
-        color: "#fff8ec",
-      }}
-    >
-      {text}
-    </div>
-  );
-};
-
-const SceneCard: React.FC<{ scene: SceneProps; title: string; captionMode: "bilingual" | "vi" }> = ({
-  scene,
-  title,
-  captionMode,
-}) => {
+const Captions: React.FC<{
+  scene: SceneProps;
+  captionMode: "bilingual" | "vi";
+}> = ({ scene, captionMode }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const spokenAt = frame / fps - scene.audioDelay;
@@ -182,49 +160,22 @@ const SceneCard: React.FC<{ scene: SceneProps; title: string; captionMode: "bili
     }
   });
   const size = Math.max(34, Math.min(54, Math.floor(860 / Math.max(scene.lineEn.length, 12))));
-  if (captionMode === "vi") {
-    return (
-      <AbsoluteFill>
-        <Picture scene={scene} />
-        <VietnameseLine scene={scene} />
-      </AbsoluteFill>
-    );
-  }
   return (
     <AbsoluteFill>
       <div
         style={{
-          height: 168,
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "center",
-          padding: "0 48px 16px",
-          fontFamily: fontStack,
-          fontWeight: 700,
-          fontSize: 40,
-          color: "#fff8ec",
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: "140px 56px 78px",
+          background: "linear-gradient(transparent, rgba(8, 16, 20, 0.82))",
           textAlign: "center",
         }}
       >
-        {title}
-      </div>
-      <div style={{ flex: 1, margin: "0 36px", borderRadius: 28, overflow: "hidden" }}>
-        <Picture scene={scene} />
-      </div>
-      <div
-        style={{
-          height: 430,
-          padding: "26px 42px 32px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 16,
-        }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center" }}>
-          {scene.words.length > 0 ? (
-            scene.words.map((word, index) => (
+        {captionMode === "bilingual" ? (
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center" }}>
+            {(scene.words.length > 0 ? scene.words : [{ text: scene.lineEn, start: 0, end: 0 }]).map((word, index) => (
               <span
                 key={`${word.text}-${index}`}
                 style={{
@@ -241,31 +192,20 @@ const SceneCard: React.FC<{ scene: SceneProps; title: string; captionMode: "bili
               >
                 {word.text}
               </span>
-            ))
-          ) : (
-            <span
-              style={{
-                fontFamily: fontStack,
-                fontWeight: 700,
-                fontSize: size,
-                color: "#fff8ec",
-                textAlign: "center",
-              }}
-            >
-              {scene.lineEn}
-            </span>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : null}
         <div
           style={{
+            marginTop: captionMode === "bilingual" ? 10 : 0,
             fontFamily: fontStack,
-            fontSize: 32,
+            fontWeight: 700,
+            fontSize: captionMode === "bilingual" ? 32 : Math.max(40, Math.min(54, Math.floor(980 / Math.max((scene.lineVi || scene.lineEn).length, 16)))),
             lineHeight: 1.35,
-            color: "#e7f6ff",
-            textAlign: "center",
+            color: captionMode === "bilingual" ? "#e7f6ff" : "#fff8ec",
           }}
         >
-          {scene.lineVi}
+          {scene.lineVi || scene.lineEn}
         </div>
       </div>
     </AbsoluteFill>
@@ -282,12 +222,20 @@ export const KidsFilm: React.FC<FilmProps> = ({
   titleAudio,
   fonts,
   captionMode,
+  reel,
   scenes,
 }) => {
   const { fps } = useVideoConfig();
   const introFrames = Math.max(0, Math.round((intro || 0) * fps));
   const outroFrames = Math.max(0, Math.round((outro || 0) * fps));
   let cursor = introFrames;
+  const placed = scenes.map((scene) => {
+    const frames = scene.frames && scene.frames > 0 ? scene.frames : Math.max(1, Math.round(scene.duration * fps));
+    const from = cursor;
+    cursor += frames;
+    return { scene, frames, from };
+  });
+  const bodyFrames = Math.max(1, cursor - introFrames);
   return (
     <AbsoluteFill style={{ backgroundColor: "#102833" }}>
       {fonts ? (
@@ -307,23 +255,33 @@ export const KidsFilm: React.FC<FilmProps> = ({
           <Audio src={staticFile(titleAudio)} />
         </Sequence>
       ) : null}
-      {scenes.map((scene, index) => {
-        const frames = Math.max(1, Math.round(scene.duration * fps));
-        const from = cursor;
-        cursor += frames;
-        return (
-          <React.Fragment key={index}>
-            <Sequence from={from} durationInFrames={frames}>
-              <SceneCard scene={scene} title={title} captionMode={captionMode || "bilingual"} />
-            </Sequence>
-            {scene.audio ? (
-              <Sequence from={from + Math.round(scene.audioDelay * fps)}>
-                <Audio src={staticFile(scene.audio)} />
-              </Sequence>
-            ) : null}
-          </React.Fragment>
-        );
-      })}
+      {reel ? (
+        <Sequence from={introFrames} durationInFrames={bodyFrames}>
+          <OffthreadVideo
+            src={staticFile(reel)}
+            muted
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        </Sequence>
+      ) : (
+        placed.map(({ scene, frames, from }, index) => (
+          <Sequence key={scene.video || scene.image || index} from={from} durationInFrames={frames}>
+            <Picture scene={scene} />
+          </Sequence>
+        ))
+      )}
+      {placed.map(({ scene, frames, from }, index) => (
+        <Sequence key={`caption-${index}`} from={from} durationInFrames={frames}>
+          <Captions scene={scene} captionMode={captionMode || "bilingual"} />
+        </Sequence>
+      ))}
+      {placed.map(({ scene, from }, index) => (
+        scene.audio ? (
+          <Sequence key={`voice-${index}`} from={from + Math.round(scene.audioDelay * fps)}>
+            <Audio src={staticFile(scene.audio)} />
+          </Sequence>
+        ) : null
+      ))}
       {outroFrames > 0 ? (
         <Sequence from={cursor} durationInFrames={outroFrames}>
           <TitleCard kicker="HẾT" title={title} logline="" />

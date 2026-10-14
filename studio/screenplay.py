@@ -187,9 +187,13 @@ ACTION_WORDS = [
 
 
 def clean_idea(idea: str) -> str:
-    text = re.sub(r"\s+", " ", idea or "").strip()
-    text = "".join(ch for ch in text if ch >= " " or ch == " ")
-    return text[:700]
+    lines = []
+    for raw in (idea or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = " ".join(raw.split()).strip()
+        line = "".join(ch for ch in line if ch >= " ")
+        if line:
+            lines.append(line)
+    return "\n".join(lines)[:4000]
 
 
 def _scene(
@@ -226,13 +230,172 @@ def _scene(
     return scene
 
 
+def _camera_hint(text: str) -> str:
+    lowered = text.lower()
+    if "lùi" in lowered:
+        return "The camera pulls back slightly"
+    if "tiến" in lowered:
+        return "The camera moves in slightly"
+    if "cận" in lowered:
+        return "Medium close-up"
+    if "ngang tầm" in lowered:
+        return "Camera at the characters' eye level"
+    if "trung cảnh" in lowered:
+        return "Medium shot"
+    return ""
+
+
+_FILLER_RE = re.compile(
+    r"(giữ nguyên hình vừa rồi|không thêm sự kiện mới|keep the previous image|do not add new events)",
+    re.IGNORECASE,
+)
+_CAMERA_MARKS = (
+    "the camera pulls back slightly",
+    "the camera moves in slightly",
+    "camera at the characters' eye level",
+    "medium close-up",
+    "medium shot",
+)
+
+
+def _is_filler(text: str) -> bool:
+    stripped = _FILLER_RE.sub("", text or "")
+    return len(stripped.strip(" .,")) < 8
+
+
+_DRAW_RE = re.compile(r"^(?:vẽ|ve|hình)\s*:\s*(.+)$", re.IGNORECASE)
+_SAY_RE = re.compile(r"^(?:đọc|doc|lồng tiếng|long tieng|thoại|thoai)\s*:\s*(.+)$", re.IGNORECASE)
+
+
+def _spoken_pair(text: str) -> tuple[str, str]:
+    """Tách lời lồng tiếng. Phần trước gạch ngang là tiếng Anh, phần sau là tiếng Việt."""
+    raw = (text or "").replace("“", "").replace("”", "").replace('"', "").replace("'", "")
+    raw = re.sub(r"nghĩa tiếng Việt\s*:\s*", "", raw, flags=re.IGNORECASE)
+    raw = " ".join(raw.replace("–", "—").split()).strip(" .")
+    if "—" in raw:
+        english, _, vietnamese = raw.partition("—")
+        return english.strip(" ."), vietnamese.strip(" .")
+    return raw.strip(" ."), ""
+
+
+def _marked_scenes(idea: str) -> list[tuple[str, str]]:
+    """Mỗi cảnh là một khối Vẽ + Đọc. Không cắt đôi câu ở giữa."""
+    if not re.search(r"(?m)^(?:vẽ|ve|hình)\s*:", idea or "", re.IGNORECASE):
+        return []
+    scenes: list[tuple[str, str]] = []
+    draw = ""
+    say = ""
+
+    def flush() -> None:
+        nonlocal draw, say
+        if draw or say:
+            scenes.append((draw.strip(" ."), say.strip()))
+        draw = ""
+        say = ""
+
+    for raw in (idea or "").replace("\r\n", "\n").split("\n"):
+        line = " ".join(raw.split()).strip()
+        if not line:
+            flush()
+            continue
+        if "|" in line and re.search(r"(?:đọc|doc|lồng tiếng)\s*:", line, re.IGNORECASE):
+            left, right = line.split("|", 1)
+            draw_match = _DRAW_RE.match(left.strip())
+            say_match = _SAY_RE.match(right.strip())
+            if draw or say:
+                flush()
+            draw = draw_match.group(1) if draw_match else left.strip()
+            say = say_match.group(1) if say_match else right.strip()
+            flush()
+            continue
+        draw_match = _DRAW_RE.match(line)
+        say_match = _SAY_RE.match(line)
+        if draw_match:
+            if draw or say:
+                flush()
+            draw = draw_match.group(1)
+        elif say_match and draw:
+            say = say_match.group(1)
+        elif draw and not say:
+            draw = f"{draw} {line}".strip()
+        else:
+            return []
+    flush()
+    return [(item_draw, item_say) for item_draw, item_say in scenes if item_draw or item_say]
+
+
 def _sentences(idea: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?…])\s+", idea.strip())
-    parts = [part.strip() for part in parts if len(part.strip()) > 8]
+    """Mỗi dòng là một cảnh. Đoạn bị dính lại thì tách theo câu máy quay."""
+    lines = [line.strip() for line in (idea or "").replace("\r\n", "\n").split("\n")]
+    lines = [line for line in lines if line and not _is_filler(line)]
+    if len(lines) > 1:
+        return lines
+    text = _FILLER_RE.sub(" ", lines[0] if lines else "")
+    text = " ".join(text.split()).strip()
+    mark = "|".join(re.escape(item) for item in _CAMERA_MARKS)
+    if text and re.search(mark, text, re.IGNORECASE):
+        pieces = re.split(f"({mark})", text, flags=re.IGNORECASE)
+        scenes: list[str] = []
+        buffer = ""
+        for piece in pieces:
+            bit = piece.strip()
+            if not bit:
+                continue
+            if re.fullmatch(mark, bit, flags=re.IGNORECASE):
+                buffer = f"{buffer} {bit}".strip()
+                scenes.append(buffer)
+                buffer = ""
+            elif buffer:
+                scenes.append(buffer)
+                buffer = bit
+            else:
+                buffer = bit
+        if buffer:
+            scenes.append(buffer)
+        scenes = [item for item in scenes if len(item) > 8 and not _is_filler(item)]
+        if len(scenes) > 1:
+            return scenes
+    parts = [part.strip() for part in re.split(r"(?<=[.!?…])\s+", text) if len(part.strip()) > 8]
+    parts = [part for part in parts if not _is_filler(part)]
     if parts:
         return parts
-    chunks = [part.strip() for part in re.split(r"[,;]", idea) if len(part.strip()) > 8]
-    return chunks or [idea.strip()]
+    return [text] if text else []
+
+
+def _split_once(text: str) -> list[str]:
+    for pattern in (r"(?<=[.!?…])\s+", r",\s+", r"\s+and\s+", r"\s+và\s+"):
+        bits = [bit.strip(" .") for bit in re.split(pattern, text, maxsplit=1) if bit.strip(" .")]
+        if len(bits) == 2 and min(len(bit) for bit in bits) > 12:
+            return bits
+    words = text.split()
+    if len(words) >= 12:
+        middle = len(words) // 2
+        return [" ".join(words[:middle]), " ".join(words[middle:])]
+    return [text]
+
+
+def _fit_count(sentences: list[str], n: int) -> list[str]:
+    """Luôn ra đúng số cảnh đã chọn."""
+    pieces = [item.strip() for item in sentences if item and item.strip()]
+    if not pieces:
+        return []
+    if len(pieces) > n:
+        width = len(pieces) / n
+        grouped = []
+        for index in range(n):
+            start = round(index * width)
+            end = round((index + 1) * width)
+            grouped.append(" ".join(pieces[start:end]).strip())
+        return [item for item in grouped if item]
+    guard = 0
+    while len(pieces) < n and guard < n * 3:
+        guard += 1
+        index = max(range(len(pieces)), key=lambda item: len(pieces[item]))
+        bits = _split_once(pieces[index])
+        if len(bits) < 2:
+            break
+        pieces[index : index + 1] = bits
+    return pieces[:n]
 
 
 def _kids_lesson(sentence: str, index: int) -> tuple[str, str]:
@@ -347,18 +510,46 @@ def write_screenplay(
     n = max(3, min(MAX_SCENES, int(n)))
     if genre in KIDS_GENRES or genre.startswith("Trẻ em"):
         return _kids_screenplay(idea, n, style, lock, genre, layout, age)
-    sentences = _sentences(idea)
-    if len(sentences) > n:
-        sentences = sentences[: n - 1] + [" ".join(sentences[n - 1 :])]
-    while len(sentences) < n:
-        sentences.append("Giữ nguyên hình vừa rồi. Không thêm sự kiện mới.")
-
+    marked = _marked_scenes(idea)
+    if marked:
+        if len(marked) > n:
+            marked = marked[:n]
+        sentences = [draw for draw, _say in marked]
+    else:
+        sentences = _fit_count(_sentences(idea) or [idea.strip()], n)
+    look = f"{style} {lock}".lower()
+    kids_look = "3d animated" in look or "not a photograph" in look
     scenes = []
     for index, sentence in enumerate(sentences[:n]):
         shot, image_en = BEATS[min(index, len(BEATS) - 1)]
-        image_prompt = f"{image_en}, {style}, {genre} short film, moment: {sentence[:180]}"
-        video_prompt = f"slow camera move, one physical action, {image_en}, {style}, moment: {sentence[:160]}"
-        scenes.append(_scene(shot, sentence, "", sentence[:110], image_prompt, video_prompt))
+        if kids_look:
+            from studio.images import _scene_action
+
+            spoken = marked[index][1] if marked else ""
+            if not spoken:
+                match = re.search(r"nói\s+(.+)$", sentence, re.IGNORECASE)
+                if match:
+                    spoken = match.group(1).strip(" .")
+            action_vi = sentence if marked else (_scene_action(sentence, sentence) or sentence)
+            line_en, line_vi = _spoken_pair(spoken)
+            image_prompt = (
+                "3D animated kids movie frame, not a photograph, no text. "
+                f"Scene: {action_vi[:360]}"
+            )
+            video_prompt = (
+                "gentle camera move, one clear action, 3D animated kids movie, not a photograph. "
+                f"Scene: {action_vi[:240]}"
+            )
+            scene = _scene(shot, action_vi[:400], "", line_en[:110] or action_vi[:110], image_prompt, video_prompt)
+            if line_en or line_vi:
+                scene["line_en"] = line_en[:240]
+                scene["line_vi"] = line_vi[:240]
+                scene["dialogue"] = f"{line_en} — {line_vi}".strip(" —")[:300]
+            scenes.append(scene)
+        else:
+            image_prompt = f"{image_en}, {style}, {genre} short film, moment: {sentence[:180]}"
+            video_prompt = f"slow camera move, one physical action, {image_en}, {style}, moment: {sentence[:160]}"
+            scenes.append(_scene(shot, sentence, "", sentence[:110], image_prompt, video_prompt))
 
     title = sentences[0][:42].rstrip("., ")
     if len(sentences[0]) > 42:

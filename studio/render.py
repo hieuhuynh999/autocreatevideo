@@ -489,9 +489,20 @@ def _add_soundtrack(
     _run(args)
 
 
-def _prompt_pack(folder: Path, title: str, logline: str, lock: str, style: str, scenes: list[dict]) -> None:
+def _prompt_pack(
+    folder: Path,
+    title: str,
+    logline: str,
+    lock: str,
+    style: str,
+    scenes: list[dict],
+    theme: str = "",
+    overview: str = "",
+) -> None:
     lines = [
         f"PHIM: {title}",
+        f"CHỦ ĐỀ: {theme}",
+        f"MÔ TẢ: {overview or logline}",
         f"LOGLINE: {logline}",
         f"KHÓA NHÂN VẬT: {lock}",
         f"PHONG CÁCH: {style}",
@@ -535,7 +546,9 @@ def _write_srt(path: Path, rows: list[tuple[float, float, str]]) -> None:
 def render_film(folder: Path, payload: dict) -> dict:
     width, height = ASPECTS[PHONE_ASPECT]
     title = str(payload.get("title") or "Phim ngắn")[:80]
-    logline = str(payload.get("logline") or "")[:240]
+    logline = str(payload.get("logline") or "")[:500]
+    theme = str(payload.get("theme") or "")[:80]
+    overview = str(payload.get("overview") or logline)[:500]
     lock = str(payload.get("lock") or "")[:300]
     style = str(payload.get("style") or "")[:160]
     scenes = payload.get("scenes") or []
@@ -546,27 +559,38 @@ def render_film(folder: Path, payload: dict) -> dict:
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True)
-    _prompt_pack(folder, title, logline, lock, style, scenes)
+    _prompt_pack(folder, title, logline, lock, style, scenes, theme, overview)
+    (folder / "mo-ta.txt").write_text(
+        "\n".join(
+            [
+                f"Tên: {title}",
+                f"Chủ đề: {theme}",
+                f"Mô tả tổng quan: {overview}",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     clips: list[Path] = []
 
     want_voice = bool(payload.get("voice", True))
+    scene_cap = 20 if payload.get("mode") == "review" else MAX_SECONDS
     warnings: list[str] = []
     spoken: list[Path | None] = []
     word_marks: list[list[dict]] = []
     lengths: list[float] = []
     for position, scene in enumerate(scenes):
-        duration = min(MAX_SECONDS, max(MIN_SECONDS, float(scene.get("duration") or 6)))
+        duration = min(scene_cap, max(MIN_SECONDS, float(scene.get("duration") or 6)))
         audio, marks = synthesize_timed(_narration(scene), work / f"voice_{position:02d}.mp3") if want_voice else (None, [])
         if audio:
             need = _media_duration(audio) + 0.55
             if need > duration + 0.15:
-                if need <= MAX_SECONDS:
+                if need <= scene_cap:
                     duration = need
                     warnings.append(f"Cảnh {position + 1} được kéo dài để không cắt lời đọc.")
                 else:
                     warnings.append(
-                        f"Cảnh {position + 1} có câu dài hơn {int(MAX_SECONDS)} giây. Lời được đọc nhanh hơn một chút, không bị cắt cụt."
+                        f"Cảnh {position + 1} có câu dài hơn {int(scene_cap)} giây. Lời được đọc nhanh hơn một chút, không bị cắt cụt."
                     )
         spoken.append(audio)
         word_marks.append(marks)

@@ -9,13 +9,17 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
+from studio.dub import dub_video
 from studio.images import create_scene_image
+from studio.review import build_review
 from studio.render import render_film, stitch_videos
 from studio.sample_story import sample_project
 from studio.adapters.motion import build_motion
+from studio.adapters.gemini import key_ready as gemini_ready
+from studio.adapters.gemini import save_key as save_gemini_key
 from studio.adapters.pollinations import key_ready, save_key
 from studio.adapters.stock_video import ready as stock_ready
 from studio.adapters.stock_video import save_key as save_stock_key
@@ -80,9 +84,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _read_json(self) -> dict:
+    def _read_json(self, limit: int = 1_500_000) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        if length > 1_500_000:
+        if length > limit:
             raise ValueError("Dữ liệu gửi lên quá lớn.")
         data = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         if not isinstance(data, dict):
@@ -113,12 +117,19 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/api/key":
             self._json(200, {"ready": key_ready()})
             return
+        if path == "/api/gemini-key":
+            self._json(200, {"ready": gemini_ready()})
+            return
         if path == "/api/stock-key":
             self._json(200, stock_ready())
             return
         if path == "/api/motion":
             sid = parse_qs(urlparse(self.path).query).get("sid", [""])[0]
             self._json(200, _motion_view(sid))
+            return
+        if path == "/api/scene-images":
+            sid = parse_qs(urlparse(self.path).query).get("sid", [""])[0]
+            self._scene_images(sid)
             return
         self.send_error(404)
 
@@ -130,7 +141,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(404)
             return
-        if candidate.suffix.lower() not in {".jpg", ".mp4", ".txt", ".json", ".srt"} or not candidate.is_file():
+        if candidate.suffix.lower() not in {".jpg", ".mp4", ".txt", ".json", ".srt", ".vtt"} or not candidate.is_file():
             self.send_error(404)
             return
         data = candidate.read_bytes()
@@ -163,6 +174,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             ".txt": "text/plain; charset=utf-8",
             ".json": "application/json; charset=utf-8",
             ".srt": "application/x-subrip; charset=utf-8",
+            ".vtt": "text/vtt; charset=utf-8",
         }[candidate.suffix.lower()]
         self.send_response(status)
         self.send_header("Content-Type", kind)
@@ -180,6 +192,12 @@ class StudioHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/api/dub":
+                self._dub()
+                return
+            if path == "/api/review":
+                self._review(self._read_json(8_000_000))
+                return
             data = self._read_json()
             if path == "/api/script":
                 self._script(data)
@@ -192,11 +210,16 @@ class StudioHandler(BaseHTTPRequestHandler):
             elif path == "/api/key":
                 save_key(str(data.get("key") or ""))
                 self._json(200, {"ready": True})
+            elif path == "/api/gemini-key":
+                save_gemini_key(str(data.get("key") or ""))
+                self._json(200, {"ready": True})
             elif path == "/api/stock-key":
                 for name in ("pexels", "pixabay", "coverr"):
                     if name in data:
                         save_stock_key(name, str(data.get(name) or ""))
                 self._json(200, stock_ready())
+            elif path == "/api/cursor-pack":
+                self._cursor_pack(data)
             elif path == "/api/stitch":
                 self._stitch(data)
             else:
@@ -206,6 +229,53 @@ class StudioHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             print("Lỗi:", type(exc).__name__, exc)
             self._json(500, {"error": "Có lỗi khi xử lý. Hãy thử lại."})
+
+    def _review(self, data: dict) -> None:
+        sid = uuid4().hex[:10]
+        folder = project_dir(sid)
+        result = build_review(folder, data)
+        self._json(
+            200,
+            {
+                "sid": sid,
+                "video": f"/output/{sid}/phim.mp4?v={uuid4().hex[:6]}",
+                "seconds": result.get("seconds"),
+                "warnings": result.get("warnings") or [],
+                "srt": f"/output/{sid}/{result.get('srt', 'phu-de.srt')}",
+                "export": f"/output/{sid}/{result.get('export', 'phim.mp4')}",
+                "renderer": "review",
+                "scenes": result.get("scenes") or 0,
+            },
+        )
+
+    def _dub(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length < 1000 or length > 80_000_000:
+            raise ValueError("Video cần có tiếng và nhỏ hơn 80 MB.")
+        query = parse_qs(urlparse(self.path).query)
+        lang = (query.get("lang") or ["vi"])[0]
+        title = unquote((query.get("title") or ["Đổi giọng"])[0])[:80]
+        theme = unquote((query.get("theme") or [""])[0])[:80]
+        overview = unquote((query.get("overview") or [""])[0])[:500]
+        blob = self.rfile.read(length)
+        sid = uuid4().hex[:10]
+        folder = project_dir(sid)
+        source = folder / "goc.mp4"
+        source.write_bytes(blob)
+        result = dub_video(folder, source, lang if lang in {"vi", "en"} else "vi", title, theme, overview)
+        self._json(
+            200,
+            {
+                "sid": sid,
+                "video": f"/output/{sid}/phim.mp4?v={uuid4().hex[:6]}",
+                "seconds": result.get("seconds"),
+                "warnings": result.get("warnings") or [],
+                "srt": f"/output/{sid}/{result.get('srt', 'phu-de.srt')}",
+                "vtt": f"/output/{sid}/{result.get('vtt', 'phu-de.vtt')}",
+                "export": f"/output/{sid}/{result.get('export', 'phim.mp4')}",
+                "renderer": "dub",
+            },
+        )
 
     def _script(self, data: dict) -> None:
         idea = clean_idea(str(data.get("idea") or ""))
@@ -222,6 +292,13 @@ class StudioHandler(BaseHTTPRequestHandler):
             str(data.get("layout") or "Truyện kể"),
             str(data.get("age") or "3–5"),
         )
+        theme = " ".join(str(data.get("theme") or "").split()).strip()[:80]
+        overview = " ".join(str(data.get("overview") or "").split()).strip()[:500]
+        title = " ".join(str(data.get("title") or "").split()).strip()[:80]
+        if title and title not in {"Phim thiếu nhi", "Phim ngắn"}:
+            screenplay["title"] = title
+        screenplay["theme"] = theme or str(screenplay.get("title") or "")[:80]
+        screenplay["overview"] = overview or str(screenplay.get("logline") or "")[:500]
         sid = uuid4().hex[:10]
         folder = project_dir(sid)
         (folder / "kich-ban.json").write_text(
@@ -240,6 +317,63 @@ class StudioHandler(BaseHTTPRequestHandler):
         )
         self._json(200, {"sid": sid, **screenplay})
 
+    def _cursor_pack(self, data: dict) -> None:
+        from studio.images import _to_english
+
+        folder = project_dir(str(data.get("sid") or ""))
+        scenes = data.get("scenes")
+        if not isinstance(scenes, list) or not scenes:
+            raise ValueError("Hãy tạo storyboard trước.")
+        lock = " ".join(str(data.get("lock") or "").split())
+        title = " ".join(str(data.get("title") or "").split())
+        blocks = [
+            f"Phim: {title}",
+            f"Mã: {folder.name}",
+            f"Thư mục: {folder}",
+            f"Hồ sơ nhân vật: {lock}",
+            "Mỗi cảnh có hai phần. Phần vẽ là hình. Phần lồng tiếng chỉ để đọc, không vẽ thành chữ.",
+            "Kịch bản trên xưởng giữ tiếng Việt. Chỉ dịch phần vẽ sang English khi vẽ.",
+            "Cảnh 1 là ảnh gốc. Cảnh sau bám đúng ảnh cảnh ngay trước.",
+            "Lưu file JPEG scene_01.jpg, scene_02.jpg, ... trong thư mục ở trên.",
+            "",
+        ]
+        for position, scene in enumerate(scenes[:MAX_SCENES]):
+            if not isinstance(scene, dict):
+                continue
+            index = position + 1
+            vietnamese = " ".join(str(scene.get("action") or scene.get("subtitle") or "").split())
+            english = _to_english(vietnamese)
+            spoken = " ".join(str(scene.get("dialogue") or "").split())
+            blocks.append(f"Cảnh {index}")
+            blocks.append(f"Phần vẽ: {vietnamese}")
+            blocks.append(f"English để vẽ: {english}")
+            blocks.append(f"Phần lồng tiếng: {spoken or '(không nói)'}")
+            blocks.append(f"File: scene_{index:02d}.jpg")
+            blocks.append("")
+        (folder / "goi-cursor.txt").write_text("\n".join(blocks), encoding="utf-8")
+        count = min(len(scenes), MAX_SCENES)
+        ask = (
+            f"Hãy vẽ {count} ảnh cho phim {folder.name}. "
+            f"Đọc file goi-cursor.txt trong thư mục output/{folder.name}. "
+            "Kịch bản giữ tiếng Việt. Cảnh sau bám ảnh cảnh ngay trước. "
+            f"Lưu scene_01.jpg đến scene_{count:02d}.jpg vào đúng thư mục đó."
+        )
+        self._json(200, {"sid": folder.name, "ask": ask, "file": "goi-cursor.txt", "count": count})
+
+    def _scene_images(self, sid: str) -> None:
+        folder = project_dir(sid)
+        images = []
+        for index in range(1, MAX_SCENES + 1):
+            path = folder / f"scene_{index:02d}.jpg"
+            if path.is_file() and path.stat().st_size > 1000:
+                images.append(
+                    {
+                        "index": index,
+                        "url": f"/output/{folder.name}/{path.name}?v={uuid4().hex[:6]}",
+                    }
+                )
+        self._json(200, {"sid": folder.name, "images": images})
+
     def _image(self, data: dict) -> None:
         folder = project_dir(str(data.get("sid") or ""))
         index = int(data.get("index") or 0)
@@ -256,6 +390,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             str(data.get("fallback") or ""),
             str(data.get("pose_b") or ""),
             str(data.get("pose_c") or ""),
+            bool(data.get("reset")),
         )
         self._json(
             200,
@@ -264,6 +399,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "placeholder": result["placeholder"],
                 "needs_key": bool(result.get("needs_key")),
                 "followed": bool(result.get("followed")),
+                "note": result.get("note") or "",
                 "error": result.get("error") or "",
             },
         )
@@ -343,7 +479,9 @@ class StudioHandler(BaseHTTPRequestHandler):
             )
         payload = {
             "title": str(data.get("title") or "Phim ngắn")[:80],
-            "logline": str(data.get("logline") or "")[:240],
+            "logline": str(data.get("logline") or data.get("overview") or "")[:500],
+            "theme": " ".join(str(data.get("theme") or "").split()).strip()[:80],
+            "overview": " ".join(str(data.get("overview") or data.get("logline") or "").split()).strip()[:500],
             "lock": str(data.get("lock") or "")[:300],
             "style": str(data.get("style") or "")[:160],
             "aspect": PHONE_ASPECT,

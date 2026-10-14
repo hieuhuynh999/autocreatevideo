@@ -136,11 +136,14 @@ def _request(url: str, data: bytes | None = None, headers: dict | None = None, t
 
 
 def _short_prompt(text: str) -> str:
-    low = text.lower()
+    cleaned = " ".join((text or "").split())
+    if cleaned.lower().startswith(("continue", "animate")):
+        return cleaned[:180]
+    low = cleaned.lower()
     for key, phrase in HINTS:
         if key in low:
-            return f"The same animals stay inside the frame. {phrase}. Camera stays still."
-    return "The same animals stay inside the frame and move gently. Camera stays still."
+            return f"The same characters stay in this picture. {phrase}. The camera moves gently. No cut."[:180]
+    return "The same characters stay in this picture and move gently. The camera moves with them. No cut."
 
 
 def _clip_bytes(payload: object) -> bytes:
@@ -211,7 +214,7 @@ def _call(engine: dict, data: list) -> bytes:
     return clip
 
 
-def _upload_call(engine: dict, image: Path, prompt: str) -> bytes:
+def _file_data(engine: dict, image: Path) -> dict:
     base = engine["base"]
     boundary, body = _multipart(image.name, image.read_bytes())
     uploaded = json.loads(
@@ -224,15 +227,20 @@ def _upload_call(engine: dict, image: Path, prompt: str) -> bytes:
     if not isinstance(uploaded, list) or not uploaded:
         raise RuntimeError("không nhận ảnh")
     path = uploaded[0]
-    file_data = {
+    return {
         "path": path,
         "url": f"{base}/gradio_api/file={path}",
         "orig_name": image.name,
         "meta": {"_type": "gradio.FileData"},
     }
+
+
+def _upload_call(engine: dict, image: Path, prompt: str, end_image: Path | None = None) -> bytes:
+    file_data = _file_data(engine, image)
+    end_data = _file_data(engine, end_image) if end_image is not None and end_image.is_file() else None
     fields = [
         file_data,
-        None,
+        end_data,
         prompt[:180],
         4,
         "text, subtitles, letters, watermark",
@@ -303,7 +311,13 @@ def _ranked() -> list[dict]:
     return sorted(ENGINES, key=lambda item: (-_WINS.get(item["name"], 0), ENGINES.index(item)))
 
 
-def generate(image: Path, prompt: str, dest: Path, seconds: float = 4.0) -> str:
+def generate(
+    image: Path,
+    prompt: str,
+    dest: Path,
+    seconds: float = 4.0,
+    end_image: Path | None = None,
+) -> str:
     del seconds
     state = _quota()
     if int(state.get("clips") or 0) >= DAILY_CLIPS:
@@ -312,6 +326,8 @@ def generate(image: Path, prompt: str, dest: Path, seconds: float = 4.0) -> str:
         )
     prompt = _short_prompt(prompt)
     ready = [item for item in _ranked() if time.time() >= _COOLDOWN.get(item["name"], 0)]
+    if end_image is not None:
+        ready.sort(key=lambda item: item.get("kind") != "upload")
     if not ready:
         raise RuntimeError("Các máy video đang nghỉ một lát.")
     errors: list[str] = []
@@ -322,7 +338,7 @@ def generate(image: Path, prompt: str, dest: Path, seconds: float = 4.0) -> str:
                 print(f"Gọi {engine['name']} cho {image.name}", flush=True)
                 kind = engine["kind"]
                 if kind == "upload":
-                    clip = _upload_call(engine, image, prompt)
+                    clip = _upload_call(engine, image, prompt, end_image)
                 elif kind == "fast":
                     clip = _fast_call(engine, image, prompt)
                 else:

@@ -35,7 +35,13 @@ def key_ready() -> bool:
     return bool(load_key())
 
 
-def _request(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 180) -> tuple[bytes, str]:
+def _request(
+    url: str,
+    data: bytes | None = None,
+    headers: dict | None = None,
+    timeout: int = 180,
+    purpose: str = "image",
+) -> tuple[bytes, str]:
     request = urllib.request.Request(url, data=data, headers=headers or {"User-Agent": "Mozilla/5.0"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -46,8 +52,12 @@ def _request(url: str, data: bytes | None = None, headers: dict | None = None, t
                 "Khóa không được chấp nhận. Vào enter.pollinations.ai/keys, tạo khóa, rồi dán khóa đó vào ô Lưu khóa."
             ) from exc
         if exc.code == 402:
+            if purpose == "video":
+                raise RuntimeError(
+                    "Tài khoản Pollinations hết pollen. Ảnh các cảnh đã có. Tạo chuyển động cần khoảng 0,05 pollen mỗi cảnh. Nạp tại enter.pollinations.ai/top-up rồi bấm Tạo chuyển động lại."
+                ) from exc
             raise RuntimeError(
-                "Tài khoản Pollinations hết pollen. Ảnh các cảnh đã có. Tạo chuyển động cần khoảng 0,05 pollen mỗi cảnh. Nạp tại enter.pollinations.ai/top-up rồi bấm Tạo chuyển động lại."
+                "Tài khoản Pollinations hết pollen nên không sửa được ảnh từ cảnh 1. Nạp tại enter.pollinations.ai/top-up nếu muốn dùng cách sửa ảnh."
             ) from exc
         detail = exc.read().decode("utf-8", "replace")[:240]
         raise RuntimeError(f"Pollinations trả {exc.code}: {detail}") from exc
@@ -153,6 +163,7 @@ def image_to_video(prompt: str, image_url: str, dest: Path, aspect: str, seconds
         url,
         headers={"Authorization": f"Bearer {key}", "User-Agent": "Mozilla/5.0"},
         timeout=240,
+        purpose="video",
     )
     if "json" in kind or data[:1] in (b"{", b"["):
         raise RuntimeError(data.decode("utf-8", "replace")[:300])

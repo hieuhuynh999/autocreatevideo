@@ -41,6 +41,7 @@
     .brand { min-width: 180px; }
     h1 { margin: 0; font-size: 20px; font-weight: 650; }
     .project-name { width: min(240px, 28vw); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: white; }
+    .mode-pick { width: 168px; background: white; }
     .meta { color: var(--muted); font-size: 13px; }
     .top-actions { display: flex; gap: 8px; }
     button.primary { background: var(--coral); color: white; border: 0; border-radius: 999px; padding: 9px 14px; font-weight: 650; }
@@ -76,8 +77,10 @@
     .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; }
     .check input { width: auto; }
     .center { display: flex; flex-direction: column; gap: 12px; }
-    video { display: block; width: min(100%, 280px); max-height: 70vh; margin: 0 auto; background: #1c1915; border-radius: 16px; }
+    video { display: block; width: min(100%, 280px); aspect-ratio: 9 / 16; max-height: 70vh; object-fit: contain; margin: 0 auto; background: #1c1915; border-radius: 16px; }
     .strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+    #reviewThumbs { margin-top: 8px; }
+    #reviewThumbs img { width: 72px; height: 96px; object-fit: cover; border-radius: 8px; background: #efe6d8; }
     .card {
       flex: 0 0 108px;
       border: 2px solid transparent;
@@ -91,6 +94,12 @@
     .card strong { display: block; margin-top: 6px; font-size: 13px; }
     .card span { color: var(--muted); font-size: 12px; }
     .status { margin: 12px 12px 0; padding: 10px 14px; border-radius: 12px; background: #fff4e5; border: 1px solid #f0d7b0; font-size: 13px; }
+    .flow { display: flex; gap: 8px; margin: 8px 12px 0; padding: 0; list-style: none; }
+    .flow li { flex: 1; min-width: 0; background: white; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: 13px; }
+    .flow li strong { display: block; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: 0.02em; }
+    .flow li.on { border-color: var(--coral); background: #fff7f3; }
+    details.pay { margin-top: 12px; }
+    details.pay summary { cursor: pointer; color: var(--muted); font-size: 12px; }
     .steps { margin: 8px 12px 0; padding: 8px 14px 8px 32px; background: white; border: 1px solid var(--line); border-radius: 12px; max-height: 96px; overflow: auto; }
     .steps:empty { display: none; }
     .steps li { margin: 4px 0; font-size: 13px; }
@@ -105,22 +114,33 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <h1>Phim ngắn thiếu nhi</h1>
+      <h1 id="brandTitle">Phim ngắn thiếu nhi</h1>
     </div>
+    <select id="genreMode" class="mode-pick" aria-label="Thể loại">
+      <option value="kids">Kids</option>
+      <option value="review">Review Product</option>
+      <option value="voice">Change Voice</option>
+    </select>
     <input id="filmTitle" class="project-name" value="Phim thiếu nhi" aria-label="Tên phim">
     <div class="meta" id="durationLabel">0 giây</div>
+    <div class="meta" id="frameLabel">Điện thoại 1080×1920</div>
     <div class="top-actions">
-      <button class="quiet" id="draw" type="button" disabled>Tạo ảnh</button>
+      <button class="quiet" id="askCursor" type="button" disabled>Nhờ Cursor vẽ</button>
+      <button class="quiet" id="loadImages" type="button" disabled>Tải ảnh đã vẽ</button>
       <button class="quiet" id="motion" type="button" disabled>Tạo chuyển động</button>
       <button class="primary" id="render" type="button" disabled>Xem trước</button>
     </div>
   </header>
-  <p class="status" id="status">Bấm Kịch bản mẫu, rồi Tạo ảnh, Tạo chuyển động, Xem trước. Video 1080×1920. Chọn nhạc và kiểu phụ đề ở cột trái.</p>
+  <p class="status" id="status">Kids: kịch bản tiếng Việt, storyboard, nhờ Cursor vẽ, rồi xem trước. Video 1080×1920.</p>
+  <ol class="flow" id="flow"></ol>
   <ol class="steps" id="steps"></ol>
   <main class="workspace">
     <aside class="panel left">
-      <label for="idea">Kịch bản — mỗi câu một cảnh</label>
-      <textarea id="idea">Bé Mi xắn tay áo rồi mở vòi nước. Bé Mi lấy xà phòng và xát hai lòng bàn tay. Bé Mi rửa sạch bọt đến cổ tay. Bé Mi lau khô và giơ hai bàn tay sạch.</textarea>
+      <p class="note" id="modeNote">Kids dùng ảnh 3D như hiện tại.</p>
+      <div id="panelKids">
+      <label for="idea">Kịch bản — mỗi cảnh một khối Vẽ và Đọc</label>
+      <textarea id="idea" placeholder="Vẽ: Na vẫy tay ở cửa nhà đồ chơi.&#10;Đọc: Hello! — Xin chào"></textarea>
+      <p class="note">Dòng Vẽ là hình cho AI. Dòng Đọc là lời lồng tiếng, không đưa vào hình.</p>
       <div class="left-actions">
         <button class="quiet" id="sample" type="button">Kịch bản mẫu</button>
         <button class="quiet" id="write" type="button">Tạo storyboard</button>
@@ -138,6 +158,7 @@
           <label for="seconds">Giây mỗi cảnh</label>
           <select id="seconds">
             <option>4</option>
+            <option>5</option>
             <option selected>6</option>
             <option>8</option>
             <option>12</option>
@@ -157,28 +178,46 @@
       <p class="note">Bỏ chọn nếu chuyện chỉ cần một dòng tiếng Việt.</p>
       <label for="lock">Hồ sơ nhân vật</label>
       <textarea id="lock">the same 3D animated child Mi, about 5, round face, big eyes, yellow t-shirt, blue shorts, white sneakers, fully clothed, same face and clothes</textarea>
-      <div id="keyBox">
-        <label for="apiKey">Khóa để cảnh sau bám cảnh 1</label>
-        <input id="apiKey" type="password" placeholder="Dán khóa rồi lưu" autocomplete="off">
-        <button class="quiet" id="saveKey" type="button" style="margin-top:8px">Lưu khóa</button>
-        <p class="note" id="keyState">Tạo khóa tại enter.pollinations.ai/keys. Chữ Pollinations không phải khóa.</p>
-      </div>
-      <details>
-        <summary class="note">Khóa video kho miễn phí, không bắt buộc</summary>
-        <label for="pexelsKey">Pexels</label>
-        <input id="pexelsKey" type="password" placeholder="Khóa Pexels" autocomplete="off">
-        <label for="pixabayKey">Pixabay</label>
-        <input id="pixabayKey" type="password" placeholder="Khóa Pixabay" autocomplete="off">
-        <label for="coverrKey">Coverr</label>
-        <input id="coverrKey" type="password" placeholder="Khóa Coverr" autocomplete="off">
-        <button class="quiet" id="saveStock" type="button" style="margin-top:8px">Lưu khóa video kho</button>
-        <p class="note" id="stockState">Khi máy Wan bận, tool dùng video dọc từ khóa nào đã lưu. Clip Wan của đúng nhân vật vẫn được gọi lại và được ưu tiên.</p>
+      <details class="pay">
+        <summary>Gemini tính phí, không dùng cho đường Cursor</summary>
+        <div id="keyBox">
+          <label for="apiKey">Khóa Gemini</label>
+          <input id="apiKey" type="password" placeholder="Chỉ dán nếu muốn tự trả phí" autocomplete="off">
+          <button class="quiet" id="saveKey" type="button" style="margin-top:8px">Lưu khóa</button>
+          <p class="note" id="keyState">Khoảng 0,03 USD mỗi ảnh. Đường chính là nhờ Cursor vẽ.</p>
+        </div>
       </details>
+      </div>
+      <div id="panelReview" hidden>
+        <label for="reviewFiles">Ảnh sản phẩm mẫu</label>
+        <input id="reviewFiles" type="file" accept="image/*" multiple>
+        <div class="strip" id="reviewThumbs"></div>
+        <p class="note">Ảnh này được dùng nguyên, phong cách như thật. Không gọi model vẽ 3D.</p>
+        <label for="reviewScript">Lời review — mỗi câu một ảnh</label>
+        <textarea id="reviewScript" placeholder="Cốc này nhẹ tay. Màu men trắng, miệng tròn. Rót nước nóng vẫn cầm được."></textarea>
+        <button class="primary" id="buildReview" type="button" style="margin-top:10px">Dựng review</button>
+      </div>
+      <div id="panelVoice" hidden>
+        <label for="voiceFile">Video có tiếng gốc</label>
+        <input id="voiceFile" type="file" accept="video/*">
+        <label for="voiceLang">Dịch sang</label>
+        <select id="voiceLang">
+          <option value="vi">Tiếng Việt</option>
+          <option value="en">English</option>
+        </select>
+        <p class="note">Bỏ tiếng cũ, kể cả tiếng Trung. Thêm giọng vừa dịch và phụ đề cùng ngôn ngữ.</p>
+        <button class="primary" id="buildVoice" type="button" style="margin-top:10px">Đổi tiếng</button>
+      </div>
+      <label for="theme">Chủ đề</label>
+      <input id="theme" placeholder="Ví dụ: Tuổi thơ quê, tình cảm gia đình" maxlength="80">
+      <label for="overview">Mô tả tổng quan</label>
+      <textarea id="overview" placeholder="Một đoạn ngắn nói video này kể chuyện gì." maxlength="500"></textarea>
     </aside>
     <section class="center">
       <div class="panel">
         <p class="note" id="previewNote">Chưa có video.</p>
         <video id="player" controls></video>
+        <p id="filmTheme" class="note"></p>
         <p id="filmLogline" class="note"></p>
         <div id="warnings" class="note"></div>
       </div>
@@ -186,13 +225,13 @@
         <div class="strip" id="strip"></div>
       </div>
     </section>
-    <aside class="panel right">
+    <aside class="panel right" id="panelRight">
       <p class="note">Cảnh đang chọn</p>
       <div id="inspector"><p class="note">Mở kịch bản, rồi bấm một cảnh để sửa lời.</p></div>
     </aside>
   </main>
   <script>
-    const state = { sid: "", scenes: [], selected: 0 };
+    const state = { sid: "", scenes: [], selected: 0, reviewImages: [], packed: false, pictured: false, moved: false };
     const $ = (id) => document.getElementById(id);
 
     function say(text) { $("status").textContent = text; }
@@ -220,7 +259,14 @@
 
     function totalSeconds() {
       const body = state.scenes.reduce((sum, scene) => sum + Number(scene.duration || 6), 0);
-      return Math.round((3.2 + body + 2.8) * 10) / 10;
+      return Math.round(body * 10) / 10;
+    }
+
+    function showAbout() {
+      const theme = $("theme").value.trim();
+      const overview = $("overview").value.trim();
+      $("filmTheme").textContent = theme ? "Chủ đề: " + theme : "";
+      $("filmLogline").textContent = overview;
     }
 
     function paintTimeline() {
@@ -233,6 +279,9 @@
         title: $("filmTitle").value,
         idea: $("idea").value,
         lock: $("lock").value,
+        theme: $("theme").value,
+        overview: $("overview").value,
+        mode: $("genreMode").value,
         scenes: state.scenes
       }));
     }
@@ -247,8 +296,10 @@
       const title = document.createElement("strong");
       title.textContent = (index + 1) + ". " + (scene.shot || "Cảnh");
       const line = document.createElement("span");
-      line.textContent = scene.line_en || scene.subtitle || "";
-      button.append(img, title, line);
+      line.textContent = "Vẽ: " + (scene.action || scene.subtitle || "");
+      const voice = document.createElement("span");
+      voice.textContent = "Đọc: " + (scene.dialogue || [scene.line_en, scene.line_vi].filter(Boolean).join(" — ") || "không nói");
+      button.append(img, title, line, voice);
       button.addEventListener("click", () => {
         state.selected = index;
         paintStrip();
@@ -270,19 +321,28 @@
       box.innerHTML = "";
       if (!scene) return;
       [
-        ["line_en", "Tiếng Anh trên hình"],
-        ["line_vi", "Tiếng Việt dưới hình"],
-        ["dialogue", "Lời đọc"],
+        ["action", "Phần vẽ — hình, không đọc"],
+        ["line_en", "Lồng tiếng Anh"],
+        ["line_vi", "Lồng tiếng Việt"],
         ["duration", "Giây"]
       ].forEach(([key, caption]) => {
         const label = document.createElement("label");
         label.textContent = caption;
-        const input = key === "dialogue" ? document.createElement("textarea") : document.createElement("input");
+        const input = key === "action" ? document.createElement("textarea") : document.createElement("input");
         input.value = scene[key] || "";
         input.addEventListener("input", () => {
           scene[key] = input.value;
-          if (key === "line_en") scene.subtitle = input.value;
+          if (key === "line_en" || key === "line_vi") {
+            const english = (scene.line_en || "").trim();
+            const vietnamese = (scene.line_vi || "").trim();
+            scene.dialogue = [english, vietnamese].filter(Boolean).join(" — ");
+            scene.subtitle = english || vietnamese;
+          }
+          if (key === "action") {
+            scene.image_prompt = "3D animated kids movie frame, not a photograph, no text. Scene: " + input.value;
+          }
           if (key === "duration") paintTimeline();
+          paintStrip();
           saveLocal();
         });
         box.append(label, input);
@@ -290,9 +350,18 @@
       const redraw = document.createElement("button");
       redraw.className = "quiet";
       redraw.type = "button";
-      redraw.textContent = "Tạo lại cảnh này";
+      redraw.textContent = "Nhờ Cursor vẽ lại cảnh này";
       redraw.style.marginTop = "10px";
-      redraw.addEventListener("click", () => drawOne(state.selected).catch((error) => mark("Tạo lại cảnh", false, error.message)));
+      redraw.addEventListener("click", () => {
+        const scene = state.scenes[state.selected];
+        const number = String(state.selected + 1).padStart(2, "0");
+        const line = "Hãy vẽ lại cảnh " + (state.selected + 1) + " của phim " + state.sid
+          + ". Tiếng Việt: " + (scene.action || "")
+          + ". Bám ảnh cảnh ngay trước. Lưu scene_" + number + ".jpg vào output/" + state.sid + ".";
+        navigator.clipboard.writeText(line).catch(() => {});
+        say(line);
+        mark("Vẽ lại cảnh", true, "Đã chép câu nhờ Cursor.");
+      });
       box.append(redraw);
     }
 
@@ -307,21 +376,27 @@
         image: ""
       }));
       $("filmTitle").value = project.title || $("filmTitle").value;
-      $("filmLogline").textContent = project.logline || "";
+      if (project.theme) $("theme").value = project.theme;
+      else if (!$("theme").value.trim()) $("theme").value = project.title || "";
+      if (project.overview) $("overview").value = project.overview;
+      else if (!$("overview").value.trim()) $("overview").value = project.logline || "";
       if (project.character_lock) $("lock").value = project.character_lock;
-      $("draw").disabled = false;
-      $("render").disabled = false;
+      showAbout();
+      $("askCursor").disabled = false;
+      $("loadImages").disabled = false;
       $("motion").disabled = false;
+      $("render").disabled = false;
+      paintFlow();
       paintStrip();
       paintInspector();
       saveLocal();
     }
 
-    async function drawOne(index) {
+    async function drawOne(index, reset) {
       const scene = state.scenes[index];
       say(index === 0
-        ? "Đang vẽ cảnh 1. Đây là mẫu cho mọi cảnh sau."
-        : "Đang vẽ cảnh " + (index + 1) + " từ ảnh cảnh 1.");
+        ? "Đang xóa ảnh cũ, rồi vẽ cảnh 1 bằng Gemini."
+        : "Đang vẽ cảnh " + (index + 1) + " bằng Gemini, bám ảnh cảnh " + index + ".");
       const data = await post("/api/image", {
         sid: state.sid,
         index: index + 1,
@@ -330,7 +405,8 @@
         lock: $("lock").value,
         aspect: "9:16",
         seed: 1000 + index,
-        fallback: scene.subtitle
+        fallback: scene.subtitle,
+        reset: !!reset
       });
       if (data.needs_key) throw new Error(data.error || "Cần khóa để cảnh sau bám cảnh 1.");
       if (data.error && data.placeholder) throw new Error(data.error);
@@ -345,10 +421,13 @@
       try {
         const project = await post("/api/script", {
           idea: $("idea").value,
+          title: $("filmTitle").value,
           genre: "Hội thoại vui",
           count: Number($("count").value),
-          style: "",
+          style: "3D animated, not a photograph",
           lock: $("lock").value,
+          theme: $("theme").value,
+          overview: $("overview").value,
           layout: "Học khái niệm",
           age: "3–5"
         });
@@ -361,19 +440,128 @@
       }
     });
 
-    $("draw").addEventListener("click", async () => {
-      $("draw").disabled = true;
+    function paintFlow() {
+      const mode = $("genreMode").value;
+      const steps = mode === "review"
+        ? [
+          ["1", "Ảnh thật", "Tải ảnh sản phẩm, không vẽ lại."],
+          ["2", "Lời Việt", "Mỗi câu một ảnh."],
+          ["3", "Xưởng dựng", "Ghép lời, nhạc và video."]
+        ]
+        : mode === "voice"
+          ? [
+            ["1", "Video gốc", "Giữ hình, bỏ tiếng cũ."],
+            ["2", "Chọn tiếng", "Việt hoặc English."],
+            ["3", "Xưởng đọc", "Giọng mới và phụ đề."]
+          ]
+          : [
+            ["1", "Kịch bản Việt", "Mỗi câu một cảnh."],
+            ["2", "Storyboard", "Xưởng chia cảnh, giữ tiếng Việt."],
+            ["3", "Cursor vẽ", "Cảnh sau bám ảnh cảnh trước."],
+            ["4", "Chuyển động", "Máy Wan làm nhân vật cử động."],
+            ["5", "Xưởng ghép", "Lời, nhạc, phụ đề, khung 1080×1920."]
+          ];
+      const box = $("flow");
+      box.innerHTML = "";
+      steps.forEach((step, index) => {
+        const item = document.createElement("li");
+        const active = mode === "kids"
+          ? (index === 0 || (index === 1 && state.scenes.length) || (index === 2 && state.packed) || (index === 3 && state.moved) || (index === 4 && state.pictured))
+          : index === 0;
+        if (active) item.className = "on";
+        const kicker = document.createElement("strong");
+        kicker.textContent = step[0] + " · " + step[1];
+        item.append(kicker, document.createTextNode(step[2]));
+        box.append(item);
+      });
+    }
+
+    $("askCursor").addEventListener("click", async () => {
+      if (!state.sid || !state.scenes.length) {
+        mark("Nhờ Cursor vẽ", false, "Hãy tạo storyboard trước.");
+        return;
+      }
+      $("askCursor").disabled = true;
+      say("Đang soạn gói ảnh tiếng Anh cho Cursor…");
       try {
-        for (let i = 0; i < state.scenes.length; i += 1) {
-          const data = await drawOne(i);
-          const followed = i === 0 ? "Đây là ảnh mẫu." : "Bám ảnh cảnh 1.";
-          mark("Tạo ảnh cảnh " + (i + 1), !data.placeholder, data.placeholder ? (data.error || "Chưa có ảnh.") : followed);
-        }
-        mark("Tạo ảnh", true, "Đủ " + state.scenes.length + " cảnh. Bấm Tạo chuyển động.");
+        const data = await post("/api/cursor-pack", {
+          sid: state.sid,
+          title: $("filmTitle").value,
+          lock: $("lock").value,
+          theme: $("theme").value,
+          overview: $("overview").value,
+          scenes: state.scenes
+        });
+        state.packed = true;
+        paintFlow();
+        try { await navigator.clipboard.writeText(data.ask); } catch (error) {}
+        say("Đã gửi gói vẽ vào cuộc trò chuyện này. Không cần dán. Khi ảnh xong, bấm Tải ảnh đã vẽ.");
+        mark("Nhờ Cursor vẽ", true, "Đã gửi. Chỉ cần chờ, rồi bấm Tải ảnh đã vẽ.");
       } catch (error) {
-        mark("Tạo ảnh", false, error.message);
+        mark("Nhờ Cursor vẽ", false, error.message);
       } finally {
-        $("draw").disabled = false;
+        $("askCursor").disabled = false;
+      }
+    });
+
+    $("loadImages").addEventListener("click", async () => {
+      if (!state.sid || !state.scenes.length) {
+        mark("Tải ảnh", false, "Hãy tạo storyboard trước.");
+        return;
+      }
+      try {
+        const response = await fetch("/api/scene-images?sid=" + encodeURIComponent(state.sid));
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Không đọc được ảnh.");
+        let found = 0;
+        (data.images || []).forEach((item) => {
+          const scene = state.scenes[item.index - 1];
+          if (!scene) return;
+          scene.image = item.url;
+          found += 1;
+        });
+        state.pictured = found > 0;
+        paintStrip();
+        paintFlow();
+        mark("Tải ảnh", found === state.scenes.length, found + "/" + state.scenes.length + " cảnh.");
+      } catch (error) {
+        mark("Tải ảnh", false, error.message);
+      }
+    });
+
+    $("motion").addEventListener("click", async () => {
+      if (!state.sid || !state.scenes.length) {
+        mark("Tạo chuyển động", false, "Hãy tạo storyboard trước.");
+        return;
+      }
+      const missing = state.scenes.some((scene) => !scene.image);
+      if (missing) {
+        mark("Tạo chuyển động", false, "Hãy bấm Tải ảnh đã vẽ trước.");
+        return;
+      }
+      $("motion").disabled = true;
+      say("Đang tạo chuyển động từ ảnh đã có. Khung điện thoại 1080×1920.");
+      try {
+        await post("/api/motion", {
+          sid: state.sid,
+          scenes: state.scenes,
+          lock: $("lock").value
+        });
+        let data = { mode: "running", message: "", scenes: [] };
+        while (data.mode === "running") {
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+          const response = await fetch("/api/motion?sid=" + encodeURIComponent(state.sid));
+          data = await response.json();
+          if (data.message) say(data.message);
+        }
+        state.moved = data.mode === "video" || data.mode === "partial";
+        paintFlow();
+        if (data.mode === "video") mark("Tạo chuyển động", true, data.message);
+        else mark("Tạo chuyển động", false, data.message);
+      } catch (error) {
+        mark("Tạo chuyển động", false, error.message);
+      } finally {
+        $("motion").disabled = false;
       }
     });
 
@@ -388,7 +576,9 @@
         const data = await post("/api/render", {
           sid: state.sid,
           title: $("filmTitle").value,
-          logline: $("filmLogline").textContent,
+          logline: $("overview").value.trim() || $("filmLogline").textContent,
+          theme: $("theme").value,
+          overview: $("overview").value,
           lock: $("lock").value,
           style: "3D animated",
           aspect: "9:16",
@@ -402,6 +592,7 @@
         });
         $("player").src = data.video;
         $("player").play().catch(() => {});
+        showAbout();
         const made = data.renderer === "remotion"
           ? (englishCaption ? "Phụ đề tiếng Anh hiện từng từ. " : "Một dòng tiếng Việt. ")
           : "";
@@ -443,88 +634,188 @@
       }
     });
 
-    $("motion").addEventListener("click", async () => {
-      $("motion").disabled = true;
-      say("Đang tự gọi máy đến khi mọi cảnh đều có clip. Cứ để nguyên.");
-      try {
-        await post("/api/motion", {
-          sid: state.sid,
-          scenes: state.scenes,
-          aspect: "9:16",
-          lock: $("lock").value
-        });
-        let data = { mode: "running", message: "", scenes: [] };
-        while (data.mode === "running") {
-          await new Promise((resolve) => setTimeout(resolve, 4000));
-          const response = await fetch("/api/motion?sid=" + encodeURIComponent(state.sid));
-          data = await response.json();
-          if (data.message) say(data.message);
-        }
-        (data.scenes || []).forEach((item) => {
-          const scene = state.scenes[item.index - 1];
-          if (scene && item.image) scene.image = item.image;
-        });
-        paintStrip();
-        if (data.mode === "video") mark("Tạo chuyển động", true, data.message);
-        else mark("Tạo chuyển động", false, data.message);
-      } catch (error) {
-        mark("Tạo chuyển động", false, error.message);
-      } finally {
-        $("motion").disabled = false;
-      }
-    });
-
     $("saveKey").addEventListener("click", async () => {
       try {
-        await post("/api/key", { key: $("apiKey").value });
+        await post("/api/gemini-key", { key: $("apiKey").value });
         $("apiKey").value = "";
-        $("keyBox").hidden = true;
-        mark("Lưu khóa", true, "Cảnh sau sẽ bám ảnh cảnh 1.");
+        $("keyState").textContent = "Đã lưu khóa Gemini. Đường này tính phí, khoảng 0,03 USD mỗi ảnh.";
+        mark("Lưu khóa", true, "Đã lưu khóa Gemini.");
       } catch (error) {
         mark("Lưu khóa", false, error.message);
       }
     });
 
-    fetch("/api/key").then((response) => response.json()).then((data) => {
-      if (data.ready) $("keyBox").hidden = true;
+    fetch("/api/gemini-key").then((response) => response.json()).then((data) => {
+      if (data.ready) $("keyState").textContent = "Đã có khóa Gemini. Mỗi ảnh khoảng 0,03 USD.";
     }).catch(() => {});
 
-    $("saveStock").addEventListener("click", async () => {
+    function applyMode() {
+      const mode = $("genreMode").value;
+      $("panelKids").hidden = mode !== "kids";
+      $("panelReview").hidden = mode !== "review";
+      $("panelVoice").hidden = mode !== "voice";
+      $("panelRight").hidden = mode !== "kids";
+      $("askCursor").hidden = mode !== "kids";
+      $("loadImages").hidden = mode !== "kids";
+      $("motion").hidden = mode !== "kids";
+      $("render").hidden = mode !== "kids";
+      paintFlow();
+      const titles = {
+        kids: "Phim ngắn thiếu nhi",
+        review: "Review sản phẩm",
+        voice: "Đổi giọng"
+      };
+      const notes = {
+        kids: "Xưởng giữ kịch bản tiếng Việt. Cursor vẽ ảnh. Tạo chuyển động làm nhân vật cử động. Mọi video xuất 1080×1920.",
+        review: "Xưởng dùng đúng ảnh mẫu, hình như thật, cắt vừa khung điện thoại 1080×1920.",
+        voice: "Xưởng nghe tiếng gốc, dịch, đọc lại, rồi cắt video vừa khung điện thoại 1080×1920."
+      };
+      $("brandTitle").textContent = titles[mode] || titles.kids;
+      $("modeNote").textContent = notes[mode] || notes.kids;
+      say(mode === "kids"
+        ? "Viết kịch bản tiếng Việt, nhờ Cursor vẽ, Tải ảnh đã vẽ, Tạo chuyển động, rồi Xem trước. Khung cố định 1080×1920."
+        : mode === "review"
+          ? "Tải ảnh sản phẩm, viết lời review tiếng Việt, rồi bấm Dựng review. Khung cố định 1080×1920."
+          : "Tải video, chọn tiếng Việt hoặc English, rồi bấm Đổi tiếng. Khung cố định 1080×1920.");
+      saveLocal();
+    }
+
+    function shrinkImage(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, 1080 / Math.max(img.width, img.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(2, Math.round(img.width * scale));
+          canvas.height = Math.max(2, Math.round(img.height * scale));
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL("image/jpeg", 0.86));
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("Không đọc được ảnh."));
+        };
+        img.src = url;
+      });
+    }
+
+    function showVideo(url, vtt) {
+      const player = $("player");
+      player.querySelectorAll("track").forEach((track) => track.remove());
+      player.src = url;
+      if (vtt) {
+        const track = document.createElement("track");
+        track.kind = "subtitles";
+        track.label = "Phụ đề";
+        track.srclang = $("voiceLang").value === "en" ? "en" : "vi";
+        track.src = vtt;
+        track.default = true;
+        player.append(track);
+      }
+      showAbout();
+      player.play().catch(() => {});
+    }
+
+    $("genreMode").addEventListener("change", applyMode);
+
+    $("reviewFiles").addEventListener("change", async () => {
+      const files = Array.from($("reviewFiles").files || []).slice(0, 6);
       try {
-        const data = await post("/api/stock-key", {
-          pexels: $("pexelsKey").value,
-          pixabay: $("pixabayKey").value,
-          coverr: $("coverrKey").value
+        state.reviewImages = [];
+        for (const file of files) state.reviewImages.push(await shrinkImage(file));
+        const box = $("reviewThumbs");
+        box.innerHTML = "";
+        state.reviewImages.forEach((src) => {
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = "Ảnh sản phẩm";
+          box.append(img);
         });
-        $("pexelsKey").value = "";
-        $("pixabayKey").value = "";
-        $("coverrKey").value = "";
-        const names = ["pexels", "pixabay", "coverr"].filter((name) => data[name]);
-        $("stockState").textContent = names.length
-          ? "Đã lưu: " + names.join(", ") + "."
-          : "Chưa có khóa video kho. Máy Wan vẫn được gọi.";
-        mark("Lưu khóa video kho", true, names.join(", ") || "Chưa lưu khóa nào.");
+        mark("Ảnh sản phẩm", true, state.reviewImages.length + " ảnh.");
       } catch (error) {
-        mark("Lưu khóa video kho", false, error.message);
+        mark("Ảnh sản phẩm", false, error.message);
       }
     });
 
-    fetch("/api/stock-key").then((response) => response.json()).then((data) => {
-      const names = ["pexels", "pixabay", "coverr"].filter((name) => data[name]);
-      if (names.length) $("stockState").textContent = "Đã có khóa: " + names.join(", ") + ".";
-    }).catch(() => {});
-
-    const saved = localStorage.getItem("kids-studio-draft");
-    if (saved) {
-      try {
-        const draft = JSON.parse(saved);
-        if (draft.idea) $("idea").value = draft.idea;
-        if (draft.lock) $("lock").value = draft.lock;
-        if (draft.title) $("filmTitle").value = draft.title;
-      } catch (error) {
-        localStorage.removeItem("kids-studio-draft");
+    $("buildReview").addEventListener("click", async () => {
+      if (!state.reviewImages.length) {
+        mark("Dựng review", false, "Hãy tải ảnh sản phẩm trước.");
+        return;
       }
-    }
+      $("buildReview").disabled = true;
+      say("Đang dựng review từ ảnh thật…");
+      try {
+        const data = await post("/api/review", {
+          title: $("filmTitle").value,
+          theme: $("theme").value,
+          overview: $("overview").value,
+          script: $("reviewScript").value,
+          images: state.reviewImages
+        });
+        showVideo(data.video, "");
+        $("previewNote").textContent = "Review dùng ảnh đã tải, khung điện thoại 1080×1920. " + data.seconds + " giây.";
+        $("warnings").textContent = (data.warnings || []).join(" ");
+        mark("Dựng review", true, data.seconds + " giây, " + data.scenes + " ảnh.");
+      } catch (error) {
+        mark("Dựng review", false, error.message);
+      } finally {
+        $("buildReview").disabled = false;
+      }
+    });
+
+    $("buildVoice").addEventListener("click", async () => {
+      const file = ($("voiceFile").files || [])[0];
+      if (!file) {
+        mark("Đổi tiếng", false, "Hãy tải một video có tiếng nói.");
+        return;
+      }
+      if (file.size > 80 * 1024 * 1024) {
+        mark("Đổi tiếng", false, "Video cần nhỏ hơn 80 MB.");
+        return;
+      }
+      $("buildVoice").disabled = true;
+      const lang = $("voiceLang").value;
+      say(lang === "en"
+        ? "Đang bỏ tiếng gốc và đọc lại bằng tiếng Anh…"
+        : "Đang bỏ tiếng gốc và đọc lại bằng tiếng Việt…");
+      try {
+        const params = new URLSearchParams({
+          lang: lang,
+          title: $("filmTitle").value,
+          theme: $("theme").value,
+          overview: $("overview").value
+        });
+        const response = await fetch("/api/dub?" + params.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: file
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Có lỗi.");
+        showVideo(data.video, data.vtt || "");
+        $("previewNote").textContent = lang === "en"
+          ? "Đã bỏ tiếng cũ. Giọng và phụ đề là tiếng Anh. Khung 1080×1920."
+          : "Đã bỏ tiếng cũ. Giọng và phụ đề là tiếng Việt. Khung 1080×1920.";
+        $("warnings").textContent = (data.warnings || []).join(" ");
+        mark("Đổi tiếng", true, data.seconds + " giây.");
+      } catch (error) {
+        mark("Đổi tiếng", false, error.message);
+      } finally {
+        $("buildVoice").disabled = false;
+      }
+    });
+
+    ["theme", "overview"].forEach((id) => {
+      $(id).addEventListener("input", () => {
+        showAbout();
+        saveLocal();
+      });
+    });
+
+    localStorage.removeItem("kids-studio-draft");
+    applyMode();
   </script>
 </body>
 </html>

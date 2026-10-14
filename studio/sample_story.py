@@ -172,6 +172,8 @@ def sample_project() -> dict:
     ]
     return {
         "title": "Ong Bông và Châu Chấu Lá",
+        "theme": "Giúp bạn khi mệt",
+        "overview": "Ong Bông thấy Châu Chấu Lá mệt, rót một cốc nước, rồi hai bạn đi chơi trong vườn.",
         "logline": "Ong giúp Châu Chấu hết mệt bằng một cốc nước, rồi hai bạn đi chơi.",
         "genre": "Hội thoại vui",
         "layout": "Học khái niệm",

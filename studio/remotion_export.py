@@ -12,7 +12,7 @@ from pathlib import Path
 
 INTRO = 0.0
 OUTRO = 0.0
-AUDIO_DELAY = 0.15
+AUDIO_DELAY = 0.05
 ROOT = Path(__file__).resolve().parents[1] / "remotion"
 PUBLIC = ROOT / "public" / "job"
 _LOCK = threading.Lock()
@@ -85,6 +85,128 @@ def align_caption(line_en: str, timed: list[dict], duration: float) -> list[dict
     ]
 
 
+def _keep_frames(ffmpeg: str, path: Path, full: float) -> int:
+    """Bỏ khúc đứng hình cuối clip. Giữ nguyên phần còn đang cử động."""
+    maximum = max(1, int(round(full * 30)) - 2)
+    process = subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-loglevel", "error",
+            "-i", str(path),
+            "-vf", "fps=10,scale=48:86,format=gray",
+            "-f", "rawvideo", "-",
+        ],
+        capture_output=True,
+    )
+    count = 48 * 86
+    raw = process.stdout or b""
+    frames = [raw[index:index + count] for index in range(0, len(raw) - count + 1, count)]
+    last = 0.4
+    for index in range(max(0, len(frames) - 1)):
+        left = frames[index]
+        right = frames[index + 1]
+        diff = sum(abs(a - b) for a, b in zip(left, right)) / count
+        if diff >= 0.5:
+            last = (index + 1) / 10
+    keep = min(full - 0.08, max(max(2.0, full - 1.0), last))
+    return max(1, min(maximum, int(round(keep * 30))))
+
+
+def _video_frames(ffmpeg: str, path: Path) -> int:
+    process = subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-loglevel", "error",
+            "-i", str(path), "-an",
+            "-vf", "scale=8:8,format=gray",
+            "-f", "rawvideo", "-",
+        ],
+        capture_output=True,
+    )
+    got = len(process.stdout or b"") // 64
+    if got < 1:
+        raise RuntimeError("Không đếm được khung hình của cảnh.")
+    return got
+
+
+def _encode_part(
+    ffmpeg: str,
+    source: Path,
+    dest: Path,
+    frames: int,
+    width: int,
+    height: int,
+) -> int:
+    end = max(1, frames) / 30
+    process = subprocess.run(
+        [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source),
+            "-vf",
+            (
+                f"trim=end={end:.6f},setpts=PTS-STARTPTS,"
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},fps=30,format=yuv420p,setsar=1"
+            ),
+            "-an",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18",
+            "-r", "30",
+            str(dest),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if process.returncode != 0 or not dest.is_file():
+        tail = (process.stderr or process.stdout or "Không cắt được cảnh.").strip()[-900:]
+        raise RuntimeError(tail or "Không cắt được cảnh.")
+    return _video_frames(ffmpeg, dest)
+
+
+def _stitch_reel(
+    ffmpeg: str,
+    parts: list[tuple[Path, int]],
+    dest: Path,
+    width: int,
+    height: int,
+) -> list[int]:
+    """Nối các clip thành một file hình. Không mờ, không đẩy, không chồng hai cảnh."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    encoded: list[Path] = []
+    counts: list[int] = []
+    try:
+        for index, (path, frames) in enumerate(parts):
+            part = dest.parent / f"_reel_{index:02d}.mp4"
+            counts.append(_encode_part(ffmpeg, path, part, frames, width, height))
+            encoded.append(part)
+        inputs: list[str] = []
+        labels: list[str] = []
+        for index, part in enumerate(encoded):
+            inputs.extend(["-i", str(part)])
+            labels.append(f"[{index}:v]")
+        process = subprocess.run(
+            [
+                ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                *inputs,
+                "-filter_complex", "".join(labels) + f"concat=n={len(encoded)}:v=1:a=0[v]",
+                "-map", "[v]", "-an",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18",
+                "-r", "30",
+                str(dest),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0 or not dest.is_file() or dest.stat().st_size < 1000:
+            tail = (process.stderr or process.stdout or "Không nối được các cảnh.").strip()[-900:]
+            raise RuntimeError(tail or "Không nối được các cảnh.")
+        return counts
+    finally:
+        for part in encoded:
+            part.unlink(missing_ok=True)
+
+
 def _public_name(path: Path) -> str:
     if path.parent == PUBLIC:
         return f"job/{path.name}"
@@ -126,7 +248,7 @@ def _export_locked(
 ) -> dict:
     from studio.images import write_placeholder
     from studio.musicbed import license_lines, normalize, write_bed
-    from studio.render import _fit_voice, _media_duration, _write_srt
+    from studio.render import FFMPEG, _fit_voice, _media_duration, _write_srt
     from studio.specs import ASPECTS, PHONE_ASPECT
 
     width, height = ASPECTS[PHONE_ASPECT]
@@ -149,6 +271,7 @@ def _export_locked(
     cursor = INTRO
     want_voice = bool(payload.get("voice", True))
     vietnamese_only = payload.get("caption") == "vi"
+    prepared: list[dict] = []
     for position, scene in enumerate(scenes):
         index = int(scene.get("index") or position + 1)
         duration = float(lengths[position])
@@ -162,8 +285,6 @@ def _export_locked(
                 str(scene.get("action") or scene.get("line_vi") or ""),
             )
         shutil.copy2(image, PUBLIC / f"scene-{index:02d}.jpg")
-        video_name = ""
-        video_seconds = 0.0
         wan = folder / f"scene_{index:02d}_motion.mp4"
         stock = folder / f"scene_{index:02d}_stock.mp4"
         clip = None
@@ -174,10 +295,47 @@ def _export_locked(
             clip = stock
             used_stock = True
             warnings.append(f"Cảnh {index} đang dùng video kho vì máy tạo chuyển động chưa trả clip.")
-        if clip is not None:
-            shutil.copy2(clip, PUBLIC / f"scene-{index:02d}.mp4")
-            video_name = f"job/scene-{index:02d}.mp4"
-            video_seconds = _media_duration(clip) or duration
+        video_seconds = _media_duration(clip) if clip is not None else 0.0
+        frames = max(1, int(round(duration * 30)))
+        if clip is not None and video_seconds > 2.2:
+            frames = _keep_frames(FFMPEG, clip, video_seconds)
+        prepared.append(
+            {
+                "scene": scene,
+                "index": index,
+                "clip": clip,
+                "frames": frames,
+                "video_seconds": video_seconds,
+            }
+        )
+
+    reel_name = ""
+    clips = [item["clip"] for item in prepared]
+    if clips and all(item is not None for item in clips):
+        counts = _stitch_reel(
+            FFMPEG,
+            [(item["clip"], item["frames"]) for item in prepared],
+            PUBLIC / "reel.mp4",
+            width,
+            height,
+        )
+        for item, count in zip(prepared, counts):
+            item["frames"] = count
+        reel_name = "job/reel.mp4"
+    else:
+        for item in prepared:
+            clip = item["clip"]
+            if clip is None:
+                continue
+            shutil.copy2(clip, PUBLIC / f"scene-{item['index']:02d}.mp4")
+
+    for position, item in enumerate(prepared):
+        scene = item["scene"]
+        index = item["index"]
+        frames = item["frames"]
+        duration = frames / 30
+        video_seconds = float(item["video_seconds"] or 0)
+        video_name = "" if reel_name or item["clip"] is None else f"job/scene-{index:02d}.mp4"
 
         line_en = "" if vietnamese_only else str(scene.get("line_en") or "").strip()
         line_vi = str(scene.get("line_vi") or scene.get("subtitle") or scene.get("dialogue") or "").strip()
@@ -208,6 +366,7 @@ def _export_locked(
         scene_props.append(
             {
                 "duration": duration,
+                "frames": frames,
                 "image": f"job/scene-{index:02d}.jpg",
                 "video": video_name,
                 "videoSeconds": round(video_seconds, 3),
@@ -242,6 +401,7 @@ def _export_locked(
         "titleAudio": title_audio,
         "fonts": fonts,
         "captionMode": "vi" if vietnamese_only else "bilingual",
+        "reel": reel_name,
         "scenes": scene_props,
     }
     props_path = (folder / "remotion-props.json").resolve()
