@@ -9,10 +9,9 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from studio.dub import dub_video
 from studio.images import create_scene_image
 from studio.review import build_review
 from studio.render import render_film, stitch_videos
@@ -192,9 +191,6 @@ class StudioHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
-            if path == "/api/dub":
-                self._dub()
-                return
             if path == "/api/review":
                 self._review(self._read_json(8_000_000))
                 return
@@ -245,35 +241,6 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "export": f"/output/{sid}/{result.get('export', 'phim.mp4')}",
                 "renderer": "review",
                 "scenes": result.get("scenes") or 0,
-            },
-        )
-
-    def _dub(self) -> None:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length < 1000 or length > 80_000_000:
-            raise ValueError("Video cần có tiếng và nhỏ hơn 80 MB.")
-        query = parse_qs(urlparse(self.path).query)
-        lang = (query.get("lang") or ["vi"])[0]
-        title = unquote((query.get("title") or ["Đổi giọng"])[0])[:80]
-        theme = unquote((query.get("theme") or [""])[0])[:80]
-        overview = unquote((query.get("overview") or [""])[0])[:500]
-        blob = self.rfile.read(length)
-        sid = uuid4().hex[:10]
-        folder = project_dir(sid)
-        source = folder / "goc.mp4"
-        source.write_bytes(blob)
-        result = dub_video(folder, source, lang if lang in {"vi", "en"} else "vi", title, theme, overview)
-        self._json(
-            200,
-            {
-                "sid": sid,
-                "video": f"/output/{sid}/phim.mp4?v={uuid4().hex[:6]}",
-                "seconds": result.get("seconds"),
-                "warnings": result.get("warnings") or [],
-                "srt": f"/output/{sid}/{result.get('srt', 'phu-de.srt')}",
-                "vtt": f"/output/{sid}/{result.get('vtt', 'phu-de.vtt')}",
-                "export": f"/output/{sid}/{result.get('export', 'phim.mp4')}",
-                "renderer": "dub",
             },
         )
 

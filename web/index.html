@@ -119,7 +119,6 @@
     <select id="genreMode" class="mode-pick" aria-label="Thể loại">
       <option value="kids">Kids</option>
       <option value="review">Review Product</option>
-      <option value="voice">Change Voice</option>
     </select>
     <input id="filmTitle" class="project-name" value="Phim thiếu nhi" aria-label="Tên phim">
     <div class="meta" id="durationLabel">0 giây</div>
@@ -192,21 +191,13 @@
         <label for="reviewFiles">Ảnh sản phẩm mẫu</label>
         <input id="reviewFiles" type="file" accept="image/*" multiple>
         <div class="strip" id="reviewThumbs"></div>
-        <p class="note">Ảnh này được dùng nguyên, phong cách như thật. Không gọi model vẽ 3D.</p>
+        <label for="reviewBg">Ảnh nền</label>
+        <input id="reviewBg" type="file" accept="image/*">
+        <div class="strip" id="reviewBgThumb"></div>
+        <p class="note">Sản phẩm đặt lên nền này. Video là hình thật, camera đi theo từng câu review. Không vẽ 3D.</p>
         <label for="reviewScript">Lời review — mỗi câu một ảnh</label>
         <textarea id="reviewScript" placeholder="Cốc này nhẹ tay. Màu men trắng, miệng tròn. Rót nước nóng vẫn cầm được."></textarea>
         <button class="primary" id="buildReview" type="button" style="margin-top:10px">Dựng review</button>
-      </div>
-      <div id="panelVoice" hidden>
-        <label for="voiceFile">Video có tiếng gốc</label>
-        <input id="voiceFile" type="file" accept="video/*">
-        <label for="voiceLang">Dịch sang</label>
-        <select id="voiceLang">
-          <option value="vi">Tiếng Việt</option>
-          <option value="en">English</option>
-        </select>
-        <p class="note">Bỏ tiếng cũ, kể cả tiếng Trung. Thêm giọng vừa dịch và phụ đề cùng ngôn ngữ.</p>
-        <button class="primary" id="buildVoice" type="button" style="margin-top:10px">Đổi tiếng</button>
       </div>
       <label for="theme">Chủ đề</label>
       <input id="theme" placeholder="Ví dụ: Tuổi thơ quê, tình cảm gia đình" maxlength="80">
@@ -231,7 +222,7 @@
     </aside>
   </main>
   <script>
-    const state = { sid: "", scenes: [], selected: 0, reviewImages: [], packed: false, pictured: false, moved: false };
+    const state = { sid: "", scenes: [], selected: 0, reviewImages: [], reviewBackground: "", packed: false, pictured: false, moved: false };
     const $ = (id) => document.getElementById(id);
 
     function say(text) { $("status").textContent = text; }
@@ -444,17 +435,11 @@
       const mode = $("genreMode").value;
       const steps = mode === "review"
         ? [
-          ["1", "Ảnh thật", "Tải ảnh sản phẩm, không vẽ lại."],
-          ["2", "Lời Việt", "Mỗi câu một ảnh."],
-          ["3", "Xưởng dựng", "Ghép lời, nhạc và video."]
+          ["1", "Ảnh thật", "Sản phẩm và một ảnh nền."],
+          ["2", "Lời review", "Mỗi câu một cảnh."],
+          ["3", "Video thật", "Camera đi theo lời, khung 1080×1920."]
         ]
-        : mode === "voice"
-          ? [
-            ["1", "Video gốc", "Giữ hình, bỏ tiếng cũ."],
-            ["2", "Chọn tiếng", "Việt hoặc English."],
-            ["3", "Xưởng đọc", "Giọng mới và phụ đề."]
-          ]
-          : [
+        : [
             ["1", "Kịch bản Việt", "Mỗi câu một cảnh."],
             ["2", "Storyboard", "Xưởng chia cảnh, giữ tiếng Việt."],
             ["3", "Cursor vẽ", "Cảnh sau bám ảnh cảnh trước."],
@@ -653,7 +638,6 @@
       const mode = $("genreMode").value;
       $("panelKids").hidden = mode !== "kids";
       $("panelReview").hidden = mode !== "review";
-      $("panelVoice").hidden = mode !== "voice";
       $("panelRight").hidden = mode !== "kids";
       $("askCursor").hidden = mode !== "kids";
       $("loadImages").hidden = mode !== "kids";
@@ -662,21 +646,17 @@
       paintFlow();
       const titles = {
         kids: "Phim ngắn thiếu nhi",
-        review: "Review sản phẩm",
-        voice: "Đổi giọng"
+        review: "Review sản phẩm"
       };
       const notes = {
         kids: "Xưởng giữ kịch bản tiếng Việt. Cursor vẽ ảnh. Tạo chuyển động làm nhân vật cử động. Mọi video xuất 1080×1920.",
-        review: "Xưởng dùng đúng ảnh mẫu, hình như thật, cắt vừa khung điện thoại 1080×1920.",
-        voice: "Xưởng nghe tiếng gốc, dịch, đọc lại, rồi cắt video vừa khung điện thoại 1080×1920."
+        review: "Sản phẩm đặt lên ảnh nền. Video là hình thật, camera đi theo từng câu review, khung 1080×1920."
       };
       $("brandTitle").textContent = titles[mode] || titles.kids;
       $("modeNote").textContent = notes[mode] || notes.kids;
       say(mode === "kids"
         ? "Viết kịch bản tiếng Việt, nhờ Cursor vẽ, Tải ảnh đã vẽ, Tạo chuyển động, rồi Xem trước. Khung cố định 1080×1920."
-        : mode === "review"
-          ? "Tải ảnh sản phẩm, viết lời review tiếng Việt, rồi bấm Dựng review. Khung cố định 1080×1920."
-          : "Tải video, chọn tiếng Việt hoặc English, rồi bấm Đổi tiếng. Khung cố định 1080×1920.");
+        : "Tải ảnh sản phẩm, tải ảnh nền, viết lời review, rồi bấm Dựng review. Khung cố định 1080×1920.");
       saveLocal();
     }
 
@@ -709,7 +689,7 @@
         const track = document.createElement("track");
         track.kind = "subtitles";
         track.label = "Phụ đề";
-        track.srclang = $("voiceLang").value === "en" ? "en" : "vi";
+        track.srclang = "vi";
         track.src = vtt;
         track.default = true;
         player.append(track);
@@ -739,71 +719,52 @@
       }
     });
 
+    $("reviewBg").addEventListener("change", async () => {
+      const file = ($("reviewBg").files || [])[0];
+      if (!file) return;
+      try {
+        state.reviewBackground = await shrinkImage(file);
+        const box = $("reviewBgThumb");
+        box.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = state.reviewBackground;
+        img.alt = "Ảnh nền";
+        box.append(img);
+        mark("Ảnh nền", true, "Đã nhận nền.");
+      } catch (error) {
+        state.reviewBackground = "";
+        mark("Ảnh nền", false, error.message);
+      }
+    });
+
     $("buildReview").addEventListener("click", async () => {
       if (!state.reviewImages.length) {
         mark("Dựng review", false, "Hãy tải ảnh sản phẩm trước.");
         return;
       }
+      if (!state.reviewBackground) {
+        mark("Dựng review", false, "Hãy tải một ảnh nền.");
+        return;
+      }
       $("buildReview").disabled = true;
-      say("Đang dựng review từ ảnh thật…");
+      say("Đang dựng video thật theo lời review…");
       try {
         const data = await post("/api/review", {
           title: $("filmTitle").value,
           theme: $("theme").value,
           overview: $("overview").value,
           script: $("reviewScript").value,
+          background: state.reviewBackground,
           images: state.reviewImages
         });
         showVideo(data.video, "");
-        $("previewNote").textContent = "Review dùng ảnh đã tải, khung điện thoại 1080×1920. " + data.seconds + " giây.";
+        $("previewNote").textContent = "Video thật, sản phẩm trên nền đã tải, lời review đi cùng hình. " + data.seconds + " giây. Khung 1080×1920.";
         $("warnings").textContent = (data.warnings || []).join(" ");
-        mark("Dựng review", true, data.seconds + " giây, " + data.scenes + " ảnh.");
+        mark("Dựng review", true, data.seconds + " giây, " + data.scenes + " cảnh.");
       } catch (error) {
         mark("Dựng review", false, error.message);
       } finally {
         $("buildReview").disabled = false;
-      }
-    });
-
-    $("buildVoice").addEventListener("click", async () => {
-      const file = ($("voiceFile").files || [])[0];
-      if (!file) {
-        mark("Đổi tiếng", false, "Hãy tải một video có tiếng nói.");
-        return;
-      }
-      if (file.size > 80 * 1024 * 1024) {
-        mark("Đổi tiếng", false, "Video cần nhỏ hơn 80 MB.");
-        return;
-      }
-      $("buildVoice").disabled = true;
-      const lang = $("voiceLang").value;
-      say(lang === "en"
-        ? "Đang bỏ tiếng gốc và đọc lại bằng tiếng Anh…"
-        : "Đang bỏ tiếng gốc và đọc lại bằng tiếng Việt…");
-      try {
-        const params = new URLSearchParams({
-          lang: lang,
-          title: $("filmTitle").value,
-          theme: $("theme").value,
-          overview: $("overview").value
-        });
-        const response = await fetch("/api/dub?" + params.toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: file
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Có lỗi.");
-        showVideo(data.video, data.vtt || "");
-        $("previewNote").textContent = lang === "en"
-          ? "Đã bỏ tiếng cũ. Giọng và phụ đề là tiếng Anh. Khung 1080×1920."
-          : "Đã bỏ tiếng cũ. Giọng và phụ đề là tiếng Việt. Khung 1080×1920.";
-        $("warnings").textContent = (data.warnings || []).join(" ");
-        mark("Đổi tiếng", true, data.seconds + " giây.");
-      } catch (error) {
-        mark("Đổi tiếng", false, error.message);
-      } finally {
-        $("buildVoice").disabled = false;
       }
     });
 
