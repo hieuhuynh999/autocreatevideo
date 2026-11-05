@@ -74,11 +74,18 @@ def _fetch(url: str) -> bytes:
         return response.read()
 
 
+def _http_url(url: str) -> str:
+    text = url.strip()
+    if text.startswith("https://") or text.startswith("http://"):
+        return text
+    return ""
+
+
 def _image_url(item: ET.Element) -> str:
     best = ""
     best_width = -1
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
-        url = node.get("url") or ""
+        url = _http_url(node.get("url") or "")
         if not url:
             continue
         try:
@@ -90,15 +97,22 @@ def _image_url(item: ET.Element) -> str:
     if best:
         return best
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
-    if thumb is not None and thumb.get("url"):
-        return thumb.get("url") or ""
+    if thumb is not None:
+        found_thumb = _http_url(thumb.get("url") or "")
+        if found_thumb:
+            return found_thumb
     enclosed = item.find("enclosure")
-    if enclosed is not None and "image" in (enclosed.get("type") or "") and enclosed.get("url"):
-        return enclosed.get("url") or ""
+    if enclosed is not None and "image" in (enclosed.get("type") or ""):
+        found_file = _http_url(enclosed.get("url") or "")
+        if found_file:
+            return found_file
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
-    found = re.findall(r"""src=['"]([^'"]+)""", raw)
-    return found[0] if found else ""
+    for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
+        found_src = _http_url(candidate)
+        if found_src:
+            return found_src
+    return ""
 
 
 def _parse_feed(outlet: str, url: str, feed: int) -> list[Story]:
@@ -264,6 +278,9 @@ def _pick(groups: list[list[Story]]) -> list[tuple[Story, list[Story]]]:
 
 
 def _save_image(url: str, dest: Path) -> bool:
+    url = _http_url(url)
+    if not url:
+        return False
     request = urllib.request.Request(url, headers={"User-Agent": IMAGE_UA, "Referer": "https://www.google.com/"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -685,20 +702,31 @@ def _media_duration(ffmpeg: str, path: Path) -> float:
 async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
     import edge_tts
 
-    voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
-    audio = bytearray()
-    words: list[tuple[float, float, str]] = []
-    async for chunk in voice.stream():
-        if chunk["type"] == "audio":
-            audio.extend(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            start = chunk["offset"] / 10_000_000
-            end = start + chunk["duration"] / 10_000_000
-            token = str(chunk["text"]).strip()
-            if token:
-                words.append((start, end, token))
-    dest.write_bytes(bytes(audio))
-    return words
+    last_error: Exception | None = None
+    for attempt in range(3):
+        voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
+        audio = bytearray()
+        words: list[tuple[float, float, str]] = []
+        try:
+            async for chunk in voice.stream():
+                if chunk["type"] == "audio":
+                    audio.extend(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    start = chunk["offset"] / 10_000_000
+                    end = start + chunk["duration"] / 10_000_000
+                    token = str(chunk["text"]).strip()
+                    if token:
+                        words.append((start, end, token))
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(2 * (attempt + 1))
+            continue
+        if audio and words:
+            dest.write_bytes(bytes(audio))
+            return words
+        last_error = RuntimeError("no audio")
+        await asyncio.sleep(2 * (attempt + 1))
+    raise RuntimeError("không nhận được giọng đọc") from last_error
 
 
 def _cue_groups(words: list[tuple[float, float, str]]) -> list[list[tuple[float, float, str]]]:
