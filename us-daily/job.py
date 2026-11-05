@@ -205,18 +205,22 @@ def write_posts(folder: Path, when: datetime) -> Path:
         path = folder / name
         blocks.append(f"===== VIDEO {index} — TÀI CHÍNH =====")
         blocks.append(f"Kịch bản: {path.name}")
-        blocks.append("File video: job này chưa ghép video tài chính. Dùng title và description dưới khi có file hình.")
+        video_path = folder / f"tai-chinh-{index}.mp4"
+        blocks.append(f"File video: {video_path if video_path.exists() else 'chưa ghép'}")
         blocks.append("")
         if path.exists():
             blocks.append(_finance_post(path, when))
         else:
             blocks.append("Chưa có kịch bản.")
         blocks.append("")
-    video, news = _news_post(folder, when)
     blocks.append("===== VIDEO 3 — TIN TỨC =====")
-    blocks.append(f"File video: {video}")
-    blocks.append("")
-    blocks.append(news)
+    if (folder / "news.txt").exists():
+        video, news = _news_post(folder, when)
+        blocks.append(f"File video: {video}")
+        blocks.append("")
+        blocks.append(news)
+    else:
+        blocks.append("Hôm nay chưa có bản tin. Tin Mỹ vẫn là một video mỗi ngày.")
     blocks.append("")
     dest = folder / "youtube.txt"
     dest.write_text("\n".join(blocks), encoding="utf-8")
@@ -237,13 +241,17 @@ def _leave_for_download(folder: Path, when: datetime, youtube: Path) -> None:
         video = folder / "vi-du-tin.mp4"
     server = Path("/opt/cursor/artifacts")
     if not server.is_dir():
-        print(f"May nha. Video: {video}")
+        print(f"May nha. Video tin: {video}")
         return
     workspace = ROOT / "artifacts"
     workspace.mkdir(exist_ok=True)
     for dest_dir in (server, workspace):
         if video.exists():
             shutil.copy2(video, dest_dir / f"tin-{day}.mp4")
+        for index in (1, 2):
+            money = folder / f"tai-chinh-{index}.mp4"
+            if money.exists():
+                shutil.copy2(money, dest_dir / f"tien-{day}-{index}.mp4")
         shutil.copy2(youtube, dest_dir / f"youtube-{day}.txt")
         print(f"De tai: {dest_dir}")
 
@@ -274,14 +282,15 @@ def main() -> int:
     started = datetime.now(VN).strftime("%Y-%m-%d %H:%M")
     if not args.titles_only:
         news_code = _run("run.py", day)
-        motion_code = _run("but_ve.py", day)
+        motion_code = _run("but_ve.py", day) if (folder / "news.txt").exists() else 1
+        money_code = _run("tien.py", day)
         log.write_text(
-            log.read_text(encoding="utf-8") + f"{started} run={news_code} but={motion_code} day={day}\n"
+            log.read_text(encoding="utf-8") + f"{started} run={news_code} but={motion_code} tien={money_code} day={day}\n"
             if log.exists()
-            else f"{started} run={news_code} but={motion_code} day={day}\n",
+            else f"{started} run={news_code} but={motion_code} tien={money_code} day={day}\n",
             encoding="utf-8",
         )
-    if not (folder / "news.txt").exists():
+    if not (folder / "finance-1.txt").exists() and not (folder / "news.txt").exists():
         print(f"Chua co bai trong {folder}")
         return 1
     write_posts(folder, when)

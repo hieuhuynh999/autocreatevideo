@@ -1,4 +1,4 @@
-"""Ba bài mỗi ngày: hai video tài chính và một bản tin Mỹ.
+"""Mỗi ngày: một bản tin Mỹ, và hai video giải thích tiền và đời sống.
 
 Chạy từ thư mục project:
   python us-daily/run.py
@@ -420,12 +420,9 @@ def finance_pair(when: datetime) -> list[dict]:
         _split(paycheck),
         _card(card, apr, month_interest, minimum, principal_drop, yearly_if_frozen),
         _fund(save, contributed, grown),
-        _debt_or_fund(paycheck),
-        _grocery(paycheck),
     ]
-    slot = (when.toordinal() * 2) % len(topics)
-    chosen = [topics[slot], topics[(slot + 1) % len(topics)]]
-    return chosen
+    slot = (when.toordinal() % 2) * 2
+    return [topics[slot], topics[slot + 1]]
 
 
 def _wrap(title: str, number: str, body: list[str], source: str) -> dict:
@@ -564,9 +561,9 @@ def _package(kind: str, spoken: str, title: str, source_lines: list[str], shot: 
     if kind == "finance":
         marks = [
             "0:00 The number",
-            "0:20 What the number includes",
-            "3:30 Where the example fails",
-            "5:30 What to do this week",
+            "0:25 What the number includes",
+            "1:30 Where the example fails",
+            "2:10 What to do this week",
         ]
         footer = "Not personal financial advice."
     else:
