@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 output/
+artifacts/
 studio/pollinations.key
 studio/gemini.key
 studio/youtube_client.json

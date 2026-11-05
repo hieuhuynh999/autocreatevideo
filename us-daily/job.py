@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -145,7 +146,27 @@ def write_posts(folder: Path, when: datetime) -> Path:
     dest = folder / "youtube.txt"
     dest.write_text("\n".join(blocks), encoding="utf-8")
     print(dest)
+    _leave_for_download(folder, when, dest)
     return dest
+
+
+def _leave_for_download(folder: Path, when: datetime, youtube: Path) -> None:
+    """Máy chủ Cursor giữ file trong artifacts. Repo GitHub đang public nên không đẩy video lên đó."""
+    day = when.strftime("%Y-%m-%d")
+    video = folder / "vi-du-but.mp4"
+    if not video.exists():
+        video = folder / "vi-du-tin.mp4"
+    server = Path("/opt/cursor/artifacts")
+    if not server.is_dir():
+        print(f"May nha. Video: {video}")
+        return
+    workspace = ROOT / "artifacts"
+    workspace.mkdir(exist_ok=True)
+    for dest_dir in (server, workspace):
+        if video.exists():
+            shutil.copy2(video, dest_dir / f"tin-{day}.mp4")
+        shutil.copy2(youtube, dest_dir / f"youtube-{day}.txt")
+        print(f"De tai: {dest_dir}")
 
 
 def _run(script: str, day: str) -> int:
