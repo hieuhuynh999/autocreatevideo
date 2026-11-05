@@ -3,6 +3,12 @@ __pycache__/
 output/
 studio/pollinations.key
 studio/gemini.key
+studio/youtube_client.json
+studio/youtube.token.json
+studio/tiktok_client.json
+studio/tiktok.token.json
+studio/facebook.json
+.env
 studio/pexels.key
 studio/pixabay.key
 studio/coverr.key
