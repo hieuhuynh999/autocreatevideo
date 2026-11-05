@@ -8,11 +8,15 @@ Job không tự đăng video.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
+import smtplib
+import ssl
 import subprocess
 import sys
 import time
+from email.message import EmailMessage
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,6 +26,7 @@ OUT = ROOT / "output" / "us-daily"
 NY = ZoneInfo("America/New_York")
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 PYTHON = sys.executable
+MAIL_TO = "huynhtronghieuiuh@gmail.com"
 
 
 def _wait_for_new_york_morning() -> None:
@@ -85,6 +90,8 @@ def _finance_post(path: Path, when: datetime) -> str:
         f"Source: {source}" if source else "The dollar amounts in this video are an example.",
         "",
         "This is not personal financial advice.",
+        "",
+        _tags(title + " " + lead, "finance"),
     ]
     return "\n".join(lines).strip()
 
@@ -114,8 +121,76 @@ def _news_post(folder: Path, when: datetime) -> tuple[str, str]:
         "",
         "Pictures and headlines belong to the newsrooms named in the video.",
         "This is not advice about your vote or your money.",
+        "",
+        _tags(title + " " + " ".join(stories), "news"),
     ]
     return str(video), "\n".join(body).strip()
+
+
+def _tags(text: str, kind: str) -> str:
+    words = text.lower()
+    if kind == "finance":
+        picked = ["#PersonalFinance", "#MoneyTips"]
+        if any(item in words for item in ("card", "debt", "apr", "percent")):
+            picked.append("#CreditCard")
+        if "grocery" in words:
+            picked.append("#Groceries")
+        if any(item in words for item in ("paycheck", "budget", "split")):
+            picked.append("#Budget")
+        if any(item in words for item in ("emergency", "saving")):
+            picked.append("#Savings")
+        if any(item in words for item in ("fund", "invest")):
+            picked.append("#Investing")
+        picked.append("#USFinance")
+    else:
+        picked = ["#USNews", "#NewsBriefing"]
+        if any(item in words for item in ("congress", "chamber")):
+            picked.append("#Congress")
+        if "midterm" in words:
+            picked.append("#Midterms")
+        if "trump" in words:
+            picked.append("#Trump")
+        if "iran" in words:
+            picked.append("#Iran")
+        if "hong kong" in words:
+            picked.append("#HongKong")
+        if any(item in words for item in ("vatican", "pope", "dylan")):
+            picked.append("#Vatican")
+    chosen: list[str] = []
+    for tag in picked:
+        if tag not in chosen:
+            chosen.append(tag)
+    return " ".join(chosen[:8])
+
+
+def _secret(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    path = ROOT / ".env"
+    if not path.exists():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(name + "="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def send_mail(when: datetime, body: str) -> str:
+    password = _secret("MAIL_APP_PASSWORD")
+    sender = _secret("MAIL_FROM") or MAIL_TO
+    if not password:
+        return "Chua gui mail: file .env chua co MAIL_APP_PASSWORD."
+    message = EmailMessage()
+    message["Subject"] = f"Đăng bài {when.strftime('%Y-%m-%d')}: title, description, hashtag"
+    message["From"] = sender
+    message["To"] = MAIL_TO
+    message.set_content(body)
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=30) as smtp:
+        smtp.login(sender, password)
+        smtp.send_message(message)
+    return f"Da gui mail toi {MAIL_TO}"
 
 
 def write_posts(folder: Path, when: datetime) -> Path:
@@ -147,6 +222,10 @@ def write_posts(folder: Path, when: datetime) -> Path:
     dest.write_text("\n".join(blocks), encoding="utf-8")
     print(dest)
     _leave_for_download(folder, when, dest)
+    try:
+        print(send_mail(when, "\n".join(blocks)))
+    except Exception as exc:
+        print(f"Chua gui mail: {exc.__class__.__name__}")
     return dest
 
 
