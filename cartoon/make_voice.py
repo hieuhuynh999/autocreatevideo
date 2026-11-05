@@ -33,11 +33,24 @@ LINES = {
 }
 
 
+async def _save(text: str, dest: Path) -> None:
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            await edge_tts.Communicate(text, VOICE, rate="-4%").save(str(dest))
+            if dest.stat().st_size > 1000:
+                return
+        except Exception as exc:
+            last = exc
+        await asyncio.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"không nhận được giọng cho {dest.name}") from last
+
+
 async def main() -> None:
     ROOT.mkdir(parents=True, exist_ok=True)
     for name, text in LINES.items():
         dest = ROOT / name
-        await edge_tts.Communicate(text, VOICE, rate="-4%").save(str(dest))
+        await _save(text, dest)
         print(dest, len(text.split()))
 
 

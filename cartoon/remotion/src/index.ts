@@ -8,29 +8,24 @@ const lengthOf = (file: string) => async () => {
   return { durationInFrames: Math.max(30, Math.ceil(seconds * 30)) };
 };
 
-const Root: React.FC = () => (
-  <>
-    <Composition
-      id="CardShort"
-      component={MoneyShort}
-      durationInFrames={1800}
-      fps={30}
-      width={1080}
-      height={1920}
-      defaultProps={{ which: "card" }}
-      calculateMetadata={lengthOf("card.mp3")}
-    />
-    <Composition
-      id="FundShort"
-      component={MoneyShort}
-      durationInFrames={1800}
-      fps={30}
-      width={1080}
-      height={1920}
-      defaultProps={{ which: "fund" }}
-      calculateMetadata={lengthOf("fund.mp3")}
-    />
-  </>
-);
+const piece = (id: string, file: string, which: "card" | "fund") =>
+  React.createElement(Composition, {
+    id,
+    component: MoneyShort,
+    durationInFrames: 1800,
+    fps: 30,
+    width: 1080,
+    height: 1920,
+    defaultProps: { which },
+    calculateMetadata: lengthOf(file),
+  });
+
+const Root: React.FC = () =>
+  React.createElement(
+    React.Fragment,
+    null,
+    piece("CardShort", "card.mp3", "card"),
+    piece("FundShort", "fund.mp3", "fund"),
+  );
 
 registerRoot(Root);
