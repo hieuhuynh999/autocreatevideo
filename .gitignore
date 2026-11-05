@@ -16,3 +16,6 @@ studio/coverr.key
 .venv/
 remotion/node_modules/
 remotion/public/job/
+cartoon/remotion/node_modules/
+cartoon/remotion/out/
+cartoon/remotion/public/*.mp3
