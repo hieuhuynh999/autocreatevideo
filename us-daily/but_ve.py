@@ -22,9 +22,6 @@ PORTRAIT_URLS = {
     "trump.jpg": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/Official_Presidential_Portrait_of_President_Donald_J._Trump_%282025%29.jpg/960px-Official_Presidential_Portrait_of_President_Donald_J._Trump_%282025%29.jpg",
     "capitol.jpg": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/United_States_Capitol_west_front_edit2.jpg/960px-United_States_Capitol_west_front_edit2.jpg",
 }
-FFMPEG = Path(
-    r"C:\Users\henry.hieu\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe"
-)
 W, H = 1280, 720
 FPS = 24
 PAPER = (244, 241, 234)
@@ -33,10 +30,46 @@ PEN = (180, 55, 28)
 BIG = (176, 32, 24)
 SMALL = (40, 40, 40)
 BAR = (22, 22, 22)
-FONT_BIG = ImageFont.truetype(r"C:\Windows\Fonts\impact.ttf", 92)
-FONT_MID = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 34)
-FONT_SMALL = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 28)
-FONT_BUG = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 26)
+def _ffmpeg_bin() -> str:
+    import imageio_ffmpeg
+
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def _font_file(windows_name: str, linux_names: tuple[str, ...]) -> str:
+    windows = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / windows_name
+    if windows.exists():
+        return str(windows)
+    roots = [
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path("/usr/share/fonts/truetype/liberation"),
+        Path("/usr/share/fonts/truetype/liberation2"),
+        STATIC / "fonts",
+    ]
+    for root in roots:
+        for name in linux_names:
+            path = root / name
+            if path.exists():
+                return str(path)
+    folder = STATIC / "fonts"
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / linux_names[0]
+    urls = {
+        "DejaVuSans-Bold.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
+        "DejaVuSans.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+    }
+    request = urllib.request.Request(urls[linux_names[0]], headers={"User-Agent": "us-daily/1.0 (local briefing)"})
+    dest.write_bytes(urllib.request.urlopen(request, timeout=40).read())
+    return str(dest)
+
+
+FONT_DISPLAY = _font_file("impact.ttf", ("DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"))
+FONT_BOLD = _font_file("arialbd.ttf", ("DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"))
+FONT_TEXT = _font_file("arial.ttf", ("DejaVuSans.ttf", "LiberationSans-Regular.ttf"))
+FONT_BIG = ImageFont.truetype(FONT_DISPLAY, 92)
+FONT_MID = ImageFont.truetype(FONT_BOLD, 34)
+FONT_SMALL = ImageFont.truetype(FONT_TEXT, 28)
+FONT_BUG = ImageFont.truetype(FONT_BOLD, 26)
 
 # Biểu tượng gốc, không vẽ mặt người.
 SCENES: dict[str, list[list[tuple[int, int]]]] = {
@@ -337,12 +370,12 @@ def _events(cues) -> list[tuple[float, float, str, str | None, str | None]]:
 def _fit(draw: ImageDraw.ImageDraw, text: str, start: int) -> ImageFont.FreeTypeFont:
     size = start
     while size > 42:
-        font = ImageFont.truetype(r"C:\Windows\Fonts\impact.ttf", size)
+        font = ImageFont.truetype(FONT_DISPLAY, size)
         box = draw.textbbox((0, 0), text, font=font)
         if box[2] - box[0] <= 760:
             return font
         size -= 4
-    return ImageFont.truetype(r"C:\Windows\Fonts\impact.ttf", 42)
+    return ImageFont.truetype(FONT_DISPLAY, 42)
 
 
 def _trace(draw: ImageDraw.ImageDraw, lines: list[list[tuple[int, int]]], budget: float) -> tuple[tuple[float, float], tuple[float, float], bool]:
@@ -442,7 +475,7 @@ def _frame(name: str, second: float, duration: float, cues) -> Image.Image:
 
 
 def _duration(path: Path) -> float:
-    proc = subprocess.run([str(FFMPEG), "-i", str(path)], capture_output=True, text=True)
+    proc = subprocess.run([_ffmpeg_bin(), "-i", str(path)], capture_output=True, text=True)
     match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr)
     if not match:
         raise RuntimeError(path.name)
@@ -458,7 +491,7 @@ def _clip(name: str) -> Path:
     out = DAY / f"{name}-but.mp4"
     proc = subprocess.Popen(
         [
-            str(FFMPEG), "-y",
+            _ffmpeg_bin(), "-y",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
             "-i", "-",
             "-i", str(audio),
@@ -559,7 +592,7 @@ def main() -> None:
     out = DAY.parent / "vi-du-but.mp4"
     proc = subprocess.run(
         [
-            str(FFMPEG), "-y", "-f", "concat", "-safe", "0", "-i", str(listing),
+            _ffmpeg_bin(), "-y", "-f", "concat", "-safe", "0", "-i", str(listing),
             "-c", "copy", "-movflags", "+faststart", str(out),
         ],
         capture_output=True,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import os
 import re
 import subprocess
 import sys
@@ -651,6 +652,30 @@ def _ffmpeg() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def _caption_fonts() -> tuple[str, str, str]:
+    windows = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    if (windows / "arial.ttf").exists():
+        return windows.as_posix().replace(":", "\\:"), "Impact", "Arial"
+    folders = [
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path("/usr/share/fonts/truetype/liberation"),
+        ROOT / "us-daily" / "static" / "fonts",
+    ]
+    for folder in folders:
+        if (folder / "DejaVuSans.ttf").exists() or (folder / "LiberationSans-Regular.ttf").exists():
+            return folder.as_posix(), "DejaVu Sans", "DejaVu Sans"
+    folder = ROOT / "us-daily" / "static" / "fonts"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
+        dest = folder / name
+        if dest.exists():
+            continue
+        url = f"https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/{name}"
+        request = urllib.request.Request(url, headers={"User-Agent": UA})
+        dest.write_bytes(urllib.request.urlopen(request, timeout=40).read())
+    return folder.as_posix(), "DejaVu Sans", "DejaVu Sans"
+
+
 def _media_duration(ffmpeg: str, path: Path) -> float:
     proc = subprocess.run([ffmpeg, "-i", str(path)], capture_output=True, text=True)
     match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr)
@@ -717,6 +742,7 @@ def _write_captions(
     duration: float,
 ) -> None:
     groups = _cue_groups(words)
+    _fonts_dir, hook_font, body_font = _caption_fonts()
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -727,10 +753,10 @@ def _write_captions(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Hook,Impact,78,&H0000FFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,1,0,1,5,0,2,70,70,150,1",
-        "Style: Caption,Arial Black,58,&H00FFFFFF,&H00B0B0B0,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,4,0,2,80,80,78,1",
-        "Style: Bug,Arial,30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,7,40,40,28,1",
-        "Style: Count,Arial,30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,9,40,40,28,1",
+        f"Style: Hook,{hook_font},78,&H0000FFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,1,0,1,5,0,2,70,70,150,1",
+        f"Style: Caption,{body_font},58,&H00FFFFFF,&H00B0B0B0,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,4,0,2,80,80,78,1",
+        f"Style: Bug,{body_font},30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,7,40,40,28,1",
+        f"Style: Count,{body_font},30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,9,40,40,28,1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -766,7 +792,7 @@ def _motion_clip(
     else:
         travel = f"(in_w-out_w)*t/{duration:.2f}"
     ass = captions.as_posix().replace(":", "\\:")
-    fonts = "C\\:/Windows/Fonts"
+    fonts, _hook_font, _body_font = _caption_fonts()
     motion = (
         "scale=1680:945:force_original_aspect_ratio=increase,crop=1680:945,"
         f"crop=1280:720:x='{travel}':y='(in_h-out_h)*0.46',setsar=1,"
