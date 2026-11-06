@@ -1,13 +1,15 @@
-"""Chạy bộ bài hằng ngày lúc 4:00 sáng New York.
+"""Dựng bản tin và một bài tiền, cắt hai Short, rồi hẹn giờ công khai.
 
-Task Windows gọi file này lúc 15:00 giờ Việt Nam.
-Mùa đông máy chờ tới 16:00. Mùa hè 15:00 đã là 4:00 sáng New York.
-Job không tự đăng video.
+Máy chủ Cursor chạy lúc 18:00 giờ Việt Nam, tức 6:00 sáng New York vào mùa đông.
+Bốn video được hẹn: 8:00, 12:00, 16:00 và 20:00 giờ miền Đông.
+Cờ --dang mới gọi YouTube. Không có cờ thì chỉ dựng file.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import os
 import re
 import shutil
@@ -193,37 +195,126 @@ def send_mail(when: datetime, body: str) -> str:
     return f"Da gui mail toi {MAIL_TO}"
 
 
+def _news_file(folder: Path) -> Path:
+    video = folder / "vi-du-but.mp4"
+    if video.exists():
+        return video
+    return folder / "vi-du-tin.mp4"
+
+
+def _short_text(title: str, lead: str, kind: str) -> tuple[str, str]:
+    suffix = " #Shorts"
+    short_title = title if title.endswith(suffix) else f"{title}{suffix}"
+    if len(short_title) > 100:
+        room = 100 - len(suffix)
+        cut = title[:room].rsplit(" ", 1)[0] or title[:room]
+        short_title = cut + suffix
+    description = "\n".join(
+        [
+            lead,
+            "",
+            "The full video is on the channel today.",
+            "",
+            "This is not personal financial advice." if kind == "finance" else "This is not advice about your vote or your money.",
+            "",
+            _tags(title + " " + lead, kind),
+            "#Shorts",
+        ]
+    )
+    return short_title, description
+
+
+def _manifest(folder: Path, when: datetime, posts: list[dict]) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("lich", ROOT / "us-daily" / "lich.py")
+    lich = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lich)
+    times = lich.public_times(when)
+    items = []
+    for post in posts:
+        stamp = times[post["slot"]]
+        items.append(
+            {
+                "file": str(post["file"]),
+                "title": post["title"],
+                "description": post["description"],
+                "publish_at": stamp.isoformat(),
+                "category": post["category"],
+            }
+        )
+    (folder / "lich.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def write_posts(folder: Path, when: datetime) -> Path:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("lich", ROOT / "us-daily" / "lich.py")
+    lich = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lich)
+    times = lich.public_times(when)
+    clock = ", ".join(item.strftime("%H:%M") for item in times.values())
     blocks = [
         f"Ngày New York: {when.strftime('%Y-%m-%d')}",
-        "Đăng từ 17:30 đến 18:00 giờ Việt Nam nếu đang giờ mùa đông của Mỹ.",
-        "Đăng từ 16:30 đến 17:00 giờ Việt Nam nếu Mỹ đang giờ mùa hè.",
-        "Cả hai mốc đều là 5:30–6:00 sáng New York. Job không tự đăng.",
+        f"Giờ công khai, giờ miền Đông: {clock}.",
+        "Thứ tự: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00.",
+        "Mùa đông các mốc đó là 20:00, 00:00, 04:00 và 08:00 giờ Việt Nam.",
         "",
     ]
-    for index, name in enumerate(("finance-1.txt", "finance-2.txt"), start=1):
-        path = folder / name
-        blocks.append(f"===== VIDEO {index} — TÀI CHÍNH =====")
-        blocks.append(f"Kịch bản: {path.name}")
-        video_path = folder / f"tai-chinh-{index}.mp4"
-        blocks.append(f"File video: {video_path if video_path.exists() else 'chưa ghép'}")
-        blocks.append("")
-        if path.exists():
-            blocks.append(_finance_post(path, when))
-        else:
-            blocks.append("Chưa có kịch bản.")
-        blocks.append("")
-    blocks.append("===== VIDEO 3 — TIN TỨC =====")
+    posts: list[dict] = []
+    money_path = folder / "finance-1.txt"
+    money_video = folder / "tai-chinh-1.mp4"
+    blocks.append("===== BÀI TIỀN =====")
+    blocks.append(f"File video: {money_video if money_video.exists() else 'chưa ghép'}")
+    blocks.append(f"Giờ công khai: {times['tien'].strftime('%Y-%m-%d %H:%M %Z')}")
+    blocks.append("")
+    if money_path.exists():
+        money_text = _finance_post(money_path, when)
+        blocks.append(money_text)
+        title = money_text.splitlines()[0]
+        posts.append(
+            {
+                "slot": "tien",
+                "file": money_video,
+                "title": title,
+                "description": money_text,
+                "category": "27",
+            }
+        )
+    else:
+        blocks.append("Chưa có kịch bản tiền.")
+    blocks.append("")
+    blocks.append("===== BẢN TIN =====")
+    news_video = _news_file(folder)
     if (folder / "news.txt").exists():
-        video, news = _news_post(folder, when)
-        blocks.append(f"File video: {video}")
+        _video, news = _news_post(folder, when)
+        blocks.append(f"File video: {news_video if news_video.exists() else 'chưa ghép'}")
+        blocks.append(f"Giờ công khai: {times['tin'].strftime('%Y-%m-%d %H:%M %Z')}")
         blocks.append("")
         blocks.append(news)
+        posts.append(
+            {
+                "slot": "tin",
+                "file": news_video,
+                "title": news.splitlines()[0],
+                "description": news,
+                "category": "25",
+            }
+        )
     else:
         blocks.append("Hôm nay chưa có bản tin. Tin Mỹ vẫn là một video mỗi ngày.")
     blocks.append("")
+    shorts = _cut_shorts(folder, posts, times)
+    for short in shorts:
+        blocks.append(f"===== SHORT {short['slot']} =====")
+        blocks.append(f"File: {short['file']}")
+        blocks.append(f"Giờ công khai: {times[short['slot']].strftime('%Y-%m-%d %H:%M %Z')}")
+        blocks.append(short["title"])
+        blocks.append("")
+        posts.append(short)
     dest = folder / "youtube.txt"
     dest.write_text("\n".join(blocks), encoding="utf-8")
+    _manifest(folder, when, posts)
     print(dest)
     _leave_for_download(folder, when, dest)
     try:
@@ -231,6 +322,39 @@ def write_posts(folder: Path, when: datetime) -> Path:
     except Exception as exc:
         print(f"Chua gui mail: {exc.__class__.__name__}")
     return dest
+
+
+def _cut_shorts(folder: Path, posts: list[dict], times: dict) -> list[dict]:
+    spec_path = ROOT / "us-daily" / "cat_short.py"
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("cat_short", spec_path)
+    cutter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cutter)
+    made = []
+    pairing = {"tin": "short-tin", "tien": "short-tien"}
+    for post in posts:
+        slot = pairing.get(post["slot"])
+        if slot is None or not Path(post["file"]).exists():
+            continue
+        dest = folder / f"{slot}.mp4"
+        try:
+            cutter.cut(Path(post["file"]), dest)
+        except Exception as exc:
+            print(f"Chưa cắt {slot}: {exc}")
+            continue
+        lead = post["description"].splitlines()[0]
+        title, description = _short_text(post["title"].replace(" #Shorts", ""), lead, "news" if slot == "short-tin" else "finance")
+        made.append(
+            {
+                "slot": slot,
+                "file": dest,
+                "title": title,
+                "description": description,
+                "category": post["category"],
+            }
+        )
+    return made
 
 
 def _leave_for_download(folder: Path, when: datetime, youtube: Path) -> None:
@@ -248,10 +372,13 @@ def _leave_for_download(folder: Path, when: datetime, youtube: Path) -> None:
     for dest_dir in (server, workspace):
         if video.exists():
             shutil.copy2(video, dest_dir / f"tin-{day}.mp4")
-        for index in (1, 2):
-            money = folder / f"tai-chinh-{index}.mp4"
-            if money.exists():
-                shutil.copy2(money, dest_dir / f"tien-{day}-{index}.mp4")
+        money = folder / "tai-chinh-1.mp4"
+        if money.exists():
+            shutil.copy2(money, dest_dir / f"tien-{day}.mp4")
+        for name in ("short-tin.mp4", "short-tien.mp4", "lich.json"):
+            extra = folder / name
+            if extra.exists():
+                shutil.copy2(extra, dest_dir / f"{extra.stem}-{day}{extra.suffix}")
         shutil.copy2(youtube, dest_dir / f"youtube-{day}.txt")
         print(f"De tai: {dest_dir}")
 
@@ -269,6 +396,7 @@ def main() -> int:
     parser.add_argument("--titles-only", action="store_true")
     parser.add_argument("--now", action="store_true")
     parser.add_argument("--day", default="")
+    parser.add_argument("--dang", action="store_true")
     args = parser.parse_args()
     if not args.now and not args.titles_only:
         _wait_for_new_york_morning()
@@ -294,7 +422,13 @@ def main() -> int:
         print(f"Chua co bai trong {folder}")
         return 1
     write_posts(folder, when)
-    return 0
+    if not args.dang:
+        print("Chưa hẹn giờ YouTube. Thêm --dang khi máy chủ đã có token tải lên.")
+        return 0
+    spec = importlib.util.spec_from_file_location("len_lich", ROOT / "us-daily" / "len_lich.py")
+    uploader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(uploader)
+    return uploader.schedule(folder)
 
 
 if __name__ == "__main__":

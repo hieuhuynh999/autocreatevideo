@@ -1,4 +1,4 @@
-"""Mỗi ngày: một bản tin Mỹ, và hai video giải thích tiền và đời sống.
+"""Mỗi ngày: một bản tin Mỹ gộp nhiều báo, và một bài tiền, nhà hoặc kinh tế.
 
 Chạy từ thư mục project:
   python us-daily/run.py
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import importlib.util
 import os
 import re
 import subprocess
@@ -442,6 +443,30 @@ def finance_pair(when: datetime) -> list[dict]:
     return [topics[slot], topics[slot + 1]]
 
 
+def _lich():
+    spec = importlib.util.spec_from_file_location("lich", Path(__file__).with_name("lich.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def finance_one(when: datetime) -> dict:
+    """Một bài tiền, nhà hoặc kinh tế cho ngày New York. Tin tức là video khác."""
+    row = _lich().row_for(when)
+    built = {
+        "emergency": lambda: _emergency(3000),
+        "split": lambda: _split(4000),
+        "card": lambda: _card(1000, 0.20, 1000 * 0.20 / 12, 25, 25 - 1000 * 0.20 / 12, 200),
+        "fund": lambda: _fund(200, 24000, 200 * (((1 + 0.07 / 12) ** 120) - 1) / (0.07 / 12)),
+        "extra": lambda: _debt_or_fund(4000),
+        "grocery": lambda: _grocery(4000),
+    }
+    key = row.get("key")
+    if key in built:
+        return built[key]()
+    return _wrap(row["title"], row["number"], row["body"], row["source"])
+
+
 def _wrap(title: str, number: str, body: list[str], source: str) -> dict:
     spoken = "\n".join(body).strip() + "\n"
     return {
@@ -614,8 +639,8 @@ def _review(when: datetime, finance: list[dict], news: str, used: list[dict], er
     fails = 0
     for index, item in enumerate(finance, start=1):
         problems = []
-        if not (420 <= item["words"] <= 1400):
-            problems.append(f"độ dài {item['words']} chữ, ngoài khoảng 420–1400, tức dưới khoảng 4 phút nói")
+        if not (90 <= item["words"] <= 1400):
+            problems.append(f"độ dài {item['words']} chữ, ngoài khoảng 90–1400")
         if "not personal financial advice" not in item["spoken"].lower():
             problems.append("thiếu câu không phải lời khuyên")
         if "this week" not in item["spoken"].lower():
@@ -647,11 +672,11 @@ def _review(when: datetime, finance: list[dict], news: str, used: list[dict], er
         lines.append(f"  - {item['outlet']}: {item['title']} ({mark})")
     lines += [
         "",
-        f"Kết luận máy: {'ba bài đủ để thu thử ở bản ngắn' if fails == 0 else 'chưa đủ để thu đủ ba bài'}.",
-        "Bài tài chính đang khoảng 4 phút nói, chưa tới 8–12 phút của kế hoạch. Bản tin lia ảnh và chạy chữ đúng nhịp lời. Lời chỉ là tiêu đề, một câu tóm tắt, và tên báo.",
+        f"Kết luận máy: {'tin và một bài tiền đủ để thu' if fails == 0 else 'chưa đủ để thu'}.",
+        "Mỗi ngày là một bản tin gộp và một bài tiền, nhà hoặc kinh tế. Lời tin chỉ là tiêu đề, một câu tóm tắt, và tên báo.",
         "",
         "Giới hạn cố ý:",
-        "- Ngân hàng bài tài chính có 6 bài. Hai bài một ngày, lặp lại sau 3 ngày. Đây không phải biên tập viên.",
+        "- Một bài tiền mỗi ngày, theo lịch 30 ngày. Sáu bài đầu dùng lời đã có. Các ngày sau dùng đúng con số và nguồn của ngày đó.",
         "- Bản tin không chép nguyên bài. Ảnh là ảnh tòa soạn gắn trong RSS. Lời chỉ là tiêu đề, tác giả và một câu trong phần tóm tắt.",
         "- AP và Reuters không có RSS công khai ổn định trong lần thử này. Nguồn đang dùng là NPR, New York Times và PBS NewsHour.",
         "- Phải nghe lại số trước khi thu. Tool không biết hóa đơn thật của người xem.",
@@ -895,7 +920,7 @@ def main() -> int:
     folder.mkdir(parents=True, exist_ok=True)
     groups, errors = _load_news()
     news, used = news_script(when, groups, folder)
-    finance = finance_pair(when)
+    finance = [finance_one(when)]
     shot_news = "Mỗi đoạn dùng ảnh mà tòa soạn đã gắn với đúng bài đó. Không vẽ cảnh thay thế."
     shot_money = "A kitchen table in morning light, one notebook, one pen, a coffee cup, slow push-in, no readable text, no face."
     sources: list[str] = []
@@ -914,7 +939,6 @@ def main() -> int:
             video_note = f"Chưa ghép được video tin: {exc}"
     files = {
         "finance-1.txt": _package("finance", finance[0]["spoken"], finance[0]["title"], [finance[0]["source"]], shot_money),
-        "finance-2.txt": _package("finance", finance[1]["spoken"], finance[1]["title"], [finance[1]["source"]], shot_money),
         "news.txt": _package(
             "news",
             news,
@@ -928,7 +952,7 @@ def main() -> int:
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
     print(files["review.md"])
-    return 0 if "ba bài đủ để thu thử" in files["review.md"] else 1
+    return 0 if "tin và một bài tiền đủ để thu" in files["review.md"] else 1
 
 
 if __name__ == "__main__":
