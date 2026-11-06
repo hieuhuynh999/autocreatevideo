@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,11 @@ def _schedule(page, stamp: str) -> None:
     if when.tzinfo is None:
         when = when.replace(tzinfo=VN)
     local = when.astimezone(VN)
+    # Studio không nhận giờ đã qua. Dựng trễ thì lùi tới mốc 15 phút kế tiếp.
+    earliest = datetime.now(VN) + timedelta(minutes=20)
+    if local < earliest:
+        bump = earliest.replace(second=0, microsecond=0)
+        local = bump + timedelta(minutes=(15 - bump.minute % 15) % 15)
     radio = page.locator('tp-yt-paper-radio-button[name="SCHEDULE"]')
     if radio.count() == 0:
         radio = page.get_by_text(re.compile(r"^lên lịch$|^schedule$", re.I))
@@ -85,10 +90,19 @@ def _one(page, item: dict) -> None:
 
 def upload_day(folder: Path) -> int:
     manifest = folder / "lich.json"
+    done = folder / "da-dang.txt"
     if not manifest.exists():
         print(f"Chưa có {manifest}. Chưa mở Studio.")
         return 1
-    items = [item for item in json.loads(manifest.read_text(encoding="utf-8")) if Path(item["file"]).exists()]
+    finished = set(done.read_text(encoding="utf-8").splitlines()) if done.exists() else set()
+    items = [
+        item
+        for item in json.loads(manifest.read_text(encoding="utf-8"))
+        if Path(item["file"]).exists() and Path(item["file"]).name not in finished
+    ]
+    if not items and finished:
+        print("Ngày này đã đăng đủ. Không đăng lại.")
+        return 0
     if not items:
         print("Chưa có file video để đăng.")
         return 1
@@ -106,7 +120,10 @@ def upload_day(folder: Path) -> int:
         print("Đã bấm Tổng quan.")
         for item in items:
             _one(page, item)
-            print(f"Xong {Path(item['file']).name}.")
+            name = Path(item["file"]).name
+            with done.open("a", encoding="utf-8") as handle:
+                handle.write(name + "\n")
+            print(f"Xong {name}.")
         page.screenshot(path=str(shot), full_page=True)
         print(shot)
     except Exception:
