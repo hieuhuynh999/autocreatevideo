@@ -239,7 +239,7 @@ ROWS = [
         ),
     },
     {
-        "title": "A monthly mortgage bill has four parts",
+        "title": "A monthly mortgage bill has 4 parts",
         "number": "4",
         "source": "Consumer Financial Protection Bureau: principal, interest, mortgage insurance, and property tax plus homeowners insurance.",
         "body": _say(
@@ -343,7 +343,7 @@ ROWS = [
         ),
     },
     {
-        "title": "Four supermarket receipts divided by four are your grocery week",
+        "title": "4 supermarket receipts divided by 4 are your grocery week",
         "number": "4",
         "source": "Your receipts. The Bureau of Labor Statistics publishes the national price indexes, which are not this personal average.",
         "body": _say(
