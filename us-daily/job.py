@@ -423,12 +423,12 @@ def main() -> int:
         return 1
     write_posts(folder, when)
     if not args.dang:
-        print("Chưa hẹn giờ YouTube. Thêm --dang khi máy chủ đã có token tải lên.")
+        print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
         return 0
-    spec = importlib.util.spec_from_file_location("len_lich", ROOT / "us-daily" / "len_lich.py")
+    spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
-    return uploader.schedule(folder)
+    return uploader.upload_day(folder)
 
 
 if __name__ == "__main__":
