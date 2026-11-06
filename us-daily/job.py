@@ -178,16 +178,18 @@ def _secret(name: str) -> str:
     return ""
 
 
-def send_mail(when: datetime, body: str) -> str:
-    password = _secret("MAIL_APP_PASSWORD")
+def send_mail(when: datetime, body: str, subject: str = "", attach: Path | None = None) -> str:
+    password = _secret("MAIL_APP_PASSWORD").replace(" ", "")
     sender = _secret("MAIL_FROM") or MAIL_TO
     if not password:
         return "Chua gui mail: file .env chua co MAIL_APP_PASSWORD."
     message = EmailMessage()
-    message["Subject"] = f"Đăng bài {when.strftime('%Y-%m-%d')}: title, description, hashtag"
+    message["Subject"] = subject or f"Đăng bài {when.strftime('%Y-%m-%d')}: title, description, hashtag"
     message["From"] = sender
     message["To"] = MAIL_TO
     message.set_content(body)
+    if attach is not None and attach.exists():
+        message.add_attachment(attach.read_bytes(), maintype="image", subtype="jpeg", filename=attach.name)
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=30) as smtp:
         smtp.login(sender, password)
@@ -317,11 +319,33 @@ def write_posts(folder: Path, when: datetime) -> Path:
     _manifest(folder, when, posts)
     print(dest)
     _leave_for_download(folder, when, dest)
+    return dest
+
+
+def _report(folder: Path, when: datetime, ok: bool, detail: str) -> None:
+    day = when.strftime("%Y-%m-%d")
+    done = folder / "da-dang.txt"
+    posted = done.read_text(encoding="utf-8").splitlines() if done.exists() else []
+    lines = [
+        f"Ngày New York: {day}",
+        f"Kết quả: {'ĐĂNG THÀNH CÔNG' if ok else 'ĐĂNG KHÔNG ĐƯỢC'}",
+        "",
+        "Video đã hẹn giờ trên kênh AMERICAN DATA DAILY:",
+        *([f"- {name}" for name in posted] or ["- chưa có video nào"]),
+        "",
+        detail,
+        "",
+        "Studio: https://studio.youtube.com/channel/UCE056WfiFMV6k4N5irnIDnA/videos",
+    ]
+    youtube = folder / "youtube.txt"
+    if youtube.exists():
+        lines += ["", "----- Tiêu đề, mô tả, hashtag -----", youtube.read_text(encoding="utf-8")]
+    subject = f"[{'OK' if ok else 'LỖI'}] Đăng YouTube ngày {day}"
+    shot = None if ok else folder / "studio-dang.jpg"
     try:
-        print(send_mail(when, "\n".join(blocks)))
+        print(send_mail(when, "\n".join(lines), subject, shot))
     except Exception as exc:
         print(f"Chua gui mail: {exc.__class__.__name__}")
-    return dest
 
 
 def _cut_shorts(folder: Path, posts: list[dict], times: dict) -> list[dict]:
@@ -420,6 +444,8 @@ def main() -> int:
         )
     if not (folder / "finance-1.txt").exists() and not (folder / "news.txt").exists():
         print(f"Chua co bai trong {folder}")
+        if args.dang:
+            _report(folder, when, False, "Không dựng được bản tin và bài tiền, nên chưa mở Studio.")
         return 1
     write_posts(folder, when)
     if not args.dang:
@@ -428,7 +454,17 @@ def main() -> int:
     spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
-    return uploader.upload_day(folder)
+    try:
+        code = uploader.upload_day(folder)
+    except Exception as exc:
+        reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
+        _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.")
+        return 1
+    posted = (folder / "da-dang.txt").read_text(encoding="utf-8").splitlines() if (folder / "da-dang.txt").exists() else []
+    ok = code == 0 and len(posted) >= 4
+    detail = "Đủ 4 video: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ miền Đông." if ok else f"Chỉ đăng được {len(posted)} trên 4 video."
+    _report(folder, when, ok, detail)
+    return code
 
 
 if __name__ == "__main__":
