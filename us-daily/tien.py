@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import importlib.util
 import math
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -668,7 +669,7 @@ def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--day", default="")
+    parser.add_argument("--day", default=os.environ.get("US_DAILY_DAY", ""))
     parser.add_argument("--index", type=int, default=0)
     args = parser.parse_args()
     when = datetime.now(NY)

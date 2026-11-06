@@ -62,13 +62,13 @@ def _first_sentence(text: str) -> str:
     return match.group(0).strip() if match else text.strip()
 
 
-def _title(sentence: str, when: datetime) -> str:
+def _title(sentence: str, when: datetime, total: int = 100) -> str:
     stamp = when.strftime("%b ") + str(when.day)
     suffix = f" | {stamp}"
     sentence = sentence.rstrip(".")
-    limit = 100 - len(suffix)
+    limit = total - len(suffix)
     if len(sentence) > limit:
-        cut = sentence[:limit].rsplit(" ", 1)[0]
+        cut = sentence[:limit].rsplit(" ", 1)[0].rstrip(" ,:;-")
         sentence = cut or sentence[:limit]
     return sentence + suffix
 
@@ -101,15 +101,20 @@ def _finance_post(path: Path, when: datetime) -> str:
 def _news_post(folder: Path, when: datetime) -> tuple[str, str]:
     text = (folder / "news.txt").read_text(encoding="utf-8")
     spoken = _field(text, "SPOKEN SCRIPT")
-    paragraphs = [block.strip() for block in spoken.split("\n\n") if block.strip()]
-    opening = _first_sentence(paragraphs[0] if paragraphs else "U.S. briefing")
-    title = _title(opening, when)
-    stories = []
-    for paragraph in paragraphs[1:]:
-        sentence = _first_sentence(paragraph)
-        if sentence.lower().startswith("not advice"):
-            continue
-        stories.append(sentence)
+    sources = re.findall(r"^\d+\.\s+(PBS NewsHour|New York Times|NPR):\s+(.+)$", _field(text, "DESCRIPTION"), re.M)
+    if sources:
+        opening = sources[0][1].strip()
+        stories = [f"{outlet}: {headline.strip()}" for outlet, headline in sources]
+    else:
+        paragraphs = [block.strip() for block in spoken.split("\n\n") if block.strip()]
+        opening = _first_sentence(paragraphs[0] if paragraphs else "U.S. briefing")
+        stories = []
+        for paragraph in paragraphs[1:]:
+            sentence = _first_sentence(paragraph)
+            if sentence.lower().startswith("not advice"):
+                continue
+            stories.append(sentence)
+    title = _title(opening, when, 70)
     video = folder / "vi-du-but.mp4"
     if not video.exists():
         video = folder / "vi-du-tin.mp4"

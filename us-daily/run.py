@@ -915,6 +915,8 @@ def _build_news_video(folder: Path, when: datetime, used: list[dict]) -> Path:
 
 def main() -> int:
     when = datetime.now(NY)
+    if os.environ.get("US_DAILY_DAY"):
+        when = datetime.strptime(os.environ["US_DAILY_DAY"], "%Y-%m-%d").replace(tzinfo=NY, hour=when.hour, minute=when.minute)
     day = when.strftime("%Y-%m-%d")
     folder = OUT / day
     folder.mkdir(parents=True, exist_ok=True)
