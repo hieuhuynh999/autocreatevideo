@@ -451,6 +451,17 @@ def main() -> int:
     if not args.dang:
         print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
         return 0
+    spec = importlib.util.spec_from_file_location("kiem_dinh", ROOT / "us-daily" / "kiem_dinh.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    try:
+        passed, verdict = checker.check(folder)
+    except Exception as exc:
+        passed, verdict = False, f"KIỂM ĐỊNH bị lỗi: {exc.__class__.__name__}. Không đăng để an toàn."
+    print(verdict)
+    if not passed:
+        _report(folder, when, False, verdict + "\n\nChưa mở Studio. Không có video nào được đăng.")
+        return 1
     spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
@@ -458,12 +469,12 @@ def main() -> int:
         code = uploader.upload_day(folder)
     except Exception as exc:
         reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
-        _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.")
+        _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.\n\n{verdict}")
         return 1
     posted = (folder / "da-dang.txt").read_text(encoding="utf-8").splitlines() if (folder / "da-dang.txt").exists() else []
     ok = code == 0 and len(posted) >= 4
     detail = "Đủ 4 video: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ miền Đông." if ok else f"Chỉ đăng được {len(posted)} trên 4 video."
-    _report(folder, when, ok, detail)
+    _report(folder, when, ok, detail + "\n\n" + verdict)
     return code
 
 
