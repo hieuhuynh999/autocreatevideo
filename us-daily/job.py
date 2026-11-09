@@ -496,12 +496,34 @@ def main() -> int:
         exc = failure
         reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
         _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.\n\n{verdict}")
+        _clean_posted(folder)
         return 1
     posted = (folder / "da-dang.txt").read_text(encoding="utf-8").splitlines() if (folder / "da-dang.txt").exists() else []
     ok = code == 0 and len(posted) >= 4
     detail = "Đủ 4 video: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ miền Đông." if ok else f"Chỉ đăng được {len(posted)} trên 4 video."
     _report(folder, when, ok, detail + "\n\n" + verdict)
+    _clean_posted(folder)
     return code
+
+
+def _clean_posted(folder: Path) -> None:
+    """Xóa video đã qua kiểm định và đã đăng. Video chưa đăng được thì giữ lại."""
+    done = folder / "da-dang.txt"
+    posted = set(done.read_text(encoding="utf-8").splitlines()) if done.exists() else set()
+    # Short được cắt từ video dài, nên video dài chỉ xóa khi Short của nó cũng đã đăng.
+    needs = {"vi-du-but.mp4": "short-tin.mp4", "vi-du-tin.mp4": "short-tin.mp4", "tai-chinh-1.mp4": "short-tien.mp4"}
+    removed = []
+    for name in sorted(posted):
+        path = folder / name
+        if path.exists() and needs.get(name, name) in posted:
+            path.unlink()
+            removed.append(name)
+    if {"short-tin.mp4", "short-tien.mp4"} <= posted and any(name in posted for name in ("vi-du-but.mp4", "vi-du-tin.mp4")) and "tai-chinh-1.mp4" in posted:
+        for leftover in [*folder.glob("vi-du-tin.mp4"), *folder.glob("anh/*.mp4"), *folder.glob("*.mp3")]:
+            leftover.unlink()
+            removed.append(leftover.name)
+    if removed:
+        print(f"Đã xóa {len(removed)} file video đã đăng trong {folder.name}.")
 
 
 if __name__ == "__main__":
