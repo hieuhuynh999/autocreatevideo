@@ -196,10 +196,22 @@ def send_mail(when: datetime, body: str, subject: str = "", attach: Path | None 
     if attach is not None and attach.exists():
         message.add_attachment(attach.read_bytes(), maintype="image", subtype="jpeg", filename=attach.name)
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=30) as smtp:
-        smtp.login(sender, password)
-        smtp.send_message(message)
-    return f"Da gui mail toi {MAIL_TO}"
+    last = None
+    for attempt in range(4):
+        try:
+            if attempt % 2 == 0:
+                smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=60)
+            else:
+                smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=60)
+                smtp.starttls(context=context)
+            with smtp:
+                smtp.login(sender, password)
+                smtp.send_message(message)
+            return f"Da gui mail toi {MAIL_TO}"
+        except (smtplib.SMTPException, OSError) as exc:
+            last = exc
+            time.sleep(20 * (attempt + 1))
+    raise last
 
 
 def _news_file(folder: Path) -> Path:
@@ -470,9 +482,18 @@ def main() -> int:
     spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
-    try:
-        code = uploader.upload_day(folder)
-    except Exception as exc:
+    failure = None
+    for attempt in range(3):
+        try:
+            code = uploader.upload_day(folder)
+            failure = None
+            break
+        except Exception as exc:
+            failure = exc
+            print(f"Lượt đăng {attempt + 1} lỗi: {str(exc).splitlines()[0][:200] if str(exc) else exc.__class__.__name__}")
+            time.sleep(120)
+    if failure is not None:
+        exc = failure
         reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
         _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.\n\n{verdict}")
         return 1

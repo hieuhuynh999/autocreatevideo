@@ -54,6 +54,12 @@ def _schedule(page, stamp: str) -> None:
     clock = page.locator("#time-of-day-container input").first
     clock.click(timeout=10_000)
     clock.fill(local.strftime("%H:%M"))
+    clock.press("Enter")
+    page.wait_for_timeout(300)
+    # Danh sách giờ còn mở sẽ che nút Lên lịch.
+    if page.locator("tp-yt-paper-listbox:visible, #time-of-day-container tp-yt-iron-dropdown:visible").count():
+        clock.press("Tab")
+        page.wait_for_timeout(300)
     print(f"Đã đặt lịch {local.strftime('%d/%m/%Y %H:%M')} giờ Việt Nam.")
 
 
@@ -88,6 +94,20 @@ def _one(page, item: dict) -> None:
         page.wait_for_timeout(800)
 
 
+def _goto(page, url: str, tries: int = 5) -> None:
+    for attempt in range(1, tries + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            if "chrome-error://" not in page.url:
+                return
+        except Exception as exc:
+            if attempt == tries:
+                raise
+            print(f"Chưa mở được {url} (lần {attempt}): {str(exc).splitlines()[0][:120]}")
+        page.wait_for_timeout(30_000 * attempt)
+    raise RuntimeError(f"Không mở được {url} sau {tries} lần.")
+
+
 def upload_day(folder: Path) -> int:
     manifest = folder / "lich.json"
     done = folder / "da-dang.txt"
@@ -109,10 +129,10 @@ def upload_day(folder: Path) -> int:
     playwright, context, page = mo_studio._open_chrome()
     shot = folder / "studio-dang.jpg"
     try:
-        page.goto(mo_studio.HOME, wait_until="domcontentloaded")
+        _goto(page, mo_studio.HOME)
         mo_studio._wait_for_login(page)
         print("Đã mở trang chủ YouTube.")
-        page.goto(mo_studio.STUDIO, wait_until="domcontentloaded")
+        _goto(page, mo_studio.STUDIO)
         mo_studio._wait_for_login(page)
         page.wait_for_url(re.compile(rf"studio\.youtube\.com/channel/{mo_studio.CHANNEL_ID}"), timeout=60_000)
         print("Đã vào kênh trong YouTube Studio.")
