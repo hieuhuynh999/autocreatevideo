@@ -519,9 +519,12 @@ def _clean_posted(folder: Path) -> None:
             path.unlink()
             removed.append(name)
     if {"short-tin.mp4", "short-tien.mp4"} <= posted and any(name in posted for name in ("vi-du-but.mp4", "vi-du-tin.mp4")) and "tai-chinh-1.mp4" in posted:
-        for leftover in [*folder.glob("vi-du-tin.mp4"), *folder.glob("anh/*.mp4"), *folder.glob("anh/*.mp3"), *folder.glob("*.mp3")]:
+        for leftover in [*folder.glob("vi-du-tin.mp4"), *folder.glob("*.mp3"), *folder.glob("*.jpg")]:
             leftover.unlink()
             removed.append(leftover.name)
+        if (folder / "anh").exists():
+            shutil.rmtree(folder / "anh", ignore_errors=True)
+            removed.append("anh")
     if removed:
         print(f"Đã xóa {len(removed)} file video đã đăng trong {folder.name}.")
 
