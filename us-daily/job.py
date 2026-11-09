@@ -519,7 +519,7 @@ def _clean_posted(folder: Path) -> None:
             path.unlink()
             removed.append(name)
     if {"short-tin.mp4", "short-tien.mp4"} <= posted and any(name in posted for name in ("vi-du-but.mp4", "vi-du-tin.mp4")) and "tai-chinh-1.mp4" in posted:
-        for leftover in [*folder.glob("vi-du-tin.mp4"), *folder.glob("anh/*.mp4"), *folder.glob("*.mp3")]:
+        for leftover in [*folder.glob("vi-du-tin.mp4"), *folder.glob("anh/*.mp4"), *folder.glob("anh/*.mp3"), *folder.glob("*.mp3")]:
             leftover.unlink()
             removed.append(leftover.name)
     if removed:
