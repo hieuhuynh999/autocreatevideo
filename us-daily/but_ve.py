@@ -207,24 +207,25 @@ def _active(cues, second: float) -> tuple[list[tuple[float, float, str]], int]:
 
 
 POSTERS = {
-    "intro": ((92, 26, 168), "THURSDAY", "ONE LINE", "MATTERS", (255, 214, 40)),
-    "00": ((16, 58, 150), "DEMOCRATS", "TOOK", "BOTH", (255, 214, 40)),
-    "01": ((150, 22, 28), "TRUMP'S", "TEAM", "COLLAPSED", (255, 255, 255)),
-    "02": ((18, 18, 22), "DYLAN", "MEETS", "THE POPE", (255, 196, 40)),
-    "03": ((12, 86, 176), "AFTER THE", "BLUE", "WAVE", (120, 230, 255)),
-    "04": ((120, 36, 18), "VANCE", "BLAMES", "IRAN", (255, 214, 40)),
-    "05": ((24, 24, 28), "HONG KONG", "SENTENCE", "10 YEARS", (255, 214, 40)),
+    "intro": ((92, 26, 168), "U.S.", "DAILY", "BRIEFING", (255, 214, 40)),
     "end": ((92, 26, 168), "REMEMBER", "ONE", "SENTENCE", (255, 214, 40)),
 }
 OUTLET = {
     "intro": "U.S. BRIEFING",
-    "00": "PBS NEWSHOUR",
-    "01": "NEW YORK TIMES",
-    "02": "NPR",
-    "03": "PBS NEWSHOUR",
-    "04": "NEW YORK TIMES",
-    "05": "NPR",
     "end": "U.S. BRIEFING",
+}
+_PALETTE = (
+    ((16, 58, 150), (255, 214, 40)),
+    ((150, 22, 28), (255, 255, 255)),
+    ((18, 18, 22), (255, 196, 40)),
+    ((12, 86, 176), (120, 230, 255)),
+    ((120, 36, 18), (255, 214, 40)),
+    ((24, 24, 28), (255, 214, 40)),
+)
+_OUTLET_LABEL = {
+    "PBS NewsHour": "PBS NEWSHOUR",
+    "New York Times": "NEW YORK TIMES",
+    "NPR": "NPR",
 }
 INK_COLOR = (255, 214, 40)
 SKIN = (235, 201, 170)
@@ -287,6 +288,45 @@ BLACK = Image.new("RGBA", (W, H), (0, 0, 0, 255))
 BLACK.putalpha(SHADE)
 
 
+def _rows(headline: str) -> tuple[str, str, str]:
+    words = [word.upper() for word in re.findall(r"[A-Za-z0-9']+", headline)][:9]
+    if not words:
+        return ("U.S.", "NEWS", "STORY")
+    groups: list[list[str]] = [[], [], []]
+    for index, word in enumerate(words):
+        groups[min(2, index * 3 // len(words))].append(word)
+    return tuple(" ".join(group) for group in groups)
+
+
+def _day_cards() -> list[tuple[str, str]]:
+    news = DAY.parent / "news.txt"
+    if not news.exists():
+        return []
+    return re.findall(
+        r"^\d+\.\s+(PBS NewsHour|New York Times|NPR):\s+(.+)$",
+        news.read_text(encoding="utf-8"),
+        re.M,
+    )
+
+
+def _apply_day_text() -> None:
+    """Chữ lớn lấy từ tiêu đề đúng ngày. Không giữ tiêu đề của một ngày cũ."""
+    when = datetime.strptime(DAY.parent.name, "%Y-%m-%d")
+    POSTERS["intro"] = (
+        (92, 26, 168),
+        when.strftime("%A").upper(),
+        "U.S.",
+        "BRIEFING",
+        (255, 214, 40),
+    )
+    for index, (outlet, headline) in enumerate(_day_cards()):
+        bg, ink = _PALETTE[index % len(_PALETTE)]
+        top, mid, key = _rows(headline)
+        name = f"{index:02d}"
+        POSTERS[name] = (bg, top, mid, key, ink)
+        OUTLET[name] = _OUTLET_LABEL.get(outlet, outlet.upper())
+
+
 def _prepare() -> None:
     global DAY, PHOTOS, DEFAULT_PHOTO
     name = os.environ.get("US_DAILY_DAY") or datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
@@ -315,6 +355,7 @@ def _prepare() -> None:
     lead = "00" if "00" in PHOTOS else "capitol"
     DEFAULT_PHOTO["intro"] = lead
     DEFAULT_PHOTO["end"] = lead
+    _apply_day_text()
 
 
 def _clip_names() -> list[str]:
