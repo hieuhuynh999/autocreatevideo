@@ -81,6 +81,33 @@ def _load(name: str):
     return module
 
 
+def _sentence_board(words):
+    """Mỗi câu một cảnh. Edge-TTS bỏ dấu chấm, nên câu mới là khoảng lặng rồi chữ hoa."""
+    safe = ("pile", "city", "statement", "folder", "boxes", "both", "autopay")
+    starts = [0]
+    for index, (start, _end, token) in enumerate(words):
+        if index == 0 or not token[:1].isupper():
+            continue
+        gap = start - words[index - 1][1]
+        if gap > 0.28:
+            starts.append(index)
+    found = []
+    for nth, index in enumerate(starts):
+        end_index = starts[nth + 1] if nth + 1 < len(starts) else len(words)
+        sentence = " ".join(token for _start, _end, token in words[index:end_index]).lower()
+        if "not personal" in sentence:
+            name = "advice"
+        elif "this week" in sentence:
+            name = "week"
+        elif nth == 0:
+            name = "open"
+        else:
+            name = safe[(nth - 1) % len(safe)]
+        start, _end, token = words[index]
+        found.append((start, name, token))
+    return found
+
+
 def _marks(words):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
@@ -90,11 +117,7 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        return _sentence_board(words)
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -145,13 +168,16 @@ def _live_line(words, second: float) -> str:
             break
     window = words[max(0, index - 6) : index + 5]
     bits: list[str] = []
-    for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+    prev_end = None
+    for start, end, token in window:
+        new_sentence = prev_end is not None and token[:1].isupper() and start - prev_end > 0.28
+        if bits and new_sentence:
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        prev_end = end
     return "".join(bits)
 
 

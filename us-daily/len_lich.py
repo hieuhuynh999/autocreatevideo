@@ -131,6 +131,8 @@ def schedule(folder: Path) -> int:
             "YOUTUBE_CLIENT_SECRET và YOUTUBE_REFRESH_TOKEN. Không gõ mật khẩu."
         )
         return 0
+    done = folder / "da-dang.txt"
+    posted = 0
     for item in items:
         path = Path(item["file"])
         if not path.exists():
@@ -141,9 +143,12 @@ def schedule(folder: Path) -> int:
         except urllib.error.HTTPError:
             print(f"YouTube từ chối {path.name}. Không in nội dung lỗi.")
             return 1
+        with done.open("a", encoding="utf-8") as handle:
+            handle.write(path.name + "\n")
+        posted += 1
         print(f"Đã hẹn {path.name}: {link}")
     print(f"Kênh {CHANNEL}")
-    return 0
+    return 0 if posted >= 4 else 1
 
 
 def main() -> int:

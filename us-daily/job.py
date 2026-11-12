@@ -2,7 +2,8 @@
 
 Máy chủ Cursor chạy lúc 18:00 giờ Việt Nam, tức 6:00 sáng New York vào mùa đông.
 Bốn video được hẹn: 8:00, 12:00, 16:00 và 20:00 giờ miền Đông.
-Cờ --dang mới gọi YouTube. Không có cờ thì chỉ dựng file.
+Cờ --dang hẹn giờ bằng token YouTube. Không gõ mật khẩu Google.
+Không có cờ thì chỉ dựng file.
 """
 
 from __future__ import annotations
@@ -466,7 +467,7 @@ def main() -> int:
         return 1
     write_posts(folder, when)
     if not args.dang:
-        print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
+        print("Chưa hẹn giờ. Thêm --dang để hẹn bằng token YouTube. Không gõ mật khẩu.")
         return 0
     spec = importlib.util.spec_from_file_location("kiem_dinh", ROOT / "us-daily" / "kiem_dinh.py")
     checker = importlib.util.module_from_spec(spec)
@@ -477,33 +478,33 @@ def main() -> int:
         passed, verdict = False, f"KIỂM ĐỊNH bị lỗi: {exc.__class__.__name__}. Không đăng để an toàn."
     print(verdict)
     if not passed:
-        _report(folder, when, False, verdict + "\n\nChưa mở Studio. Không có video nào được đăng.")
+        _report(folder, when, False, verdict + "\n\nChưa hẹn giờ. Không có video nào được đăng.")
         return 1
-    spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
+    if not _youtube_ready():
+        print(
+            "Thiếu YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET hoặc YOUTUBE_REFRESH_TOKEN. "
+            "Đã để bốn video và phần chữ trong artifacts. Không gõ mật khẩu. Dừng, không hẹn giờ."
+        )
+        return 0
+    spec = importlib.util.spec_from_file_location("len_lich", ROOT / "us-daily" / "len_lich.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
-    failure = None
-    for attempt in range(3):
-        try:
-            code = uploader.upload_day(folder)
-            failure = None
-            break
-        except Exception as exc:
-            failure = exc
-            print(f"Lượt đăng {attempt + 1} lỗi: {str(exc).splitlines()[0][:200] if str(exc) else exc.__class__.__name__}")
-            time.sleep(120)
-    if failure is not None:
-        exc = failure
+    try:
+        code = uploader.schedule(folder)
+    except Exception as exc:
         reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
-        _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.\n\n{verdict}")
-        _clean_posted(folder)
+        _report(folder, when, False, f"Lỗi khi hẹn giờ bằng token: {reason}\n\n{verdict}")
         return 1
     posted = (folder / "da-dang.txt").read_text(encoding="utf-8").splitlines() if (folder / "da-dang.txt").exists() else []
     ok = code == 0 and len(posted) >= 4
-    detail = "Đủ 4 video: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ miền Đông." if ok else f"Chỉ đăng được {len(posted)} trên 4 video."
+    detail = "Đủ 4 video: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ miền Đông." if ok else f"Chỉ hẹn được {len(posted)} trên 4 video."
     _report(folder, when, ok, detail + "\n\n" + verdict)
     _clean_posted(folder)
     return code
+
+
+def _youtube_ready() -> bool:
+    return all(_secret(name) for name in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"))
 
 
 def _clean_posted(folder: Path) -> None:
