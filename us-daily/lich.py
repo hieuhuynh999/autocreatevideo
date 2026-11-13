@@ -1,7 +1,7 @@
 """Giờ công khai theo giờ miền Đông, và một bài tiền mỗi ngày.
 
-Tin Mỹ là một video gộp báo trong ngày. Bài còn lại là tiền, nhà hoặc kinh tế.
-Hai Short cắt từ hai video đó. Máy chủ hẹn giờ, không để Chrome mở cả ngày.
+Mỗi ngày hai Short dọc: tin Mỹ gộp từ báo trong ngày, và một bài tiền, nhà
+hoặc kinh tế. Studio hẹn giờ, không để Chrome mở cả ngày.
 """
 
 from __future__ import annotations
@@ -12,13 +12,10 @@ from zoneinfo import ZoneInfo
 NY = ZoneInfo("America/New_York")
 START = datetime(2026, 11, 6, tzinfo=NY)
 
-# Giờ người xem Mỹ đang mở YouTube. Tin vào buổi sáng, Short tin lúc nghỉ trưa,
-# bài tiền trước giờ xem tối, Short tiền trong khung Short buổi tối.
+# Chỉ còn Short. Tin vào buổi sáng, tiền trước giờ xem tối.
 SLOTS = (
-    ("tin", 8, 0),
-    ("short-tin", 12, 0),
-    ("tien", 16, 0),
-    ("short-tien", 20, 0),
+    ("short-tin", 8, 0),
+    ("short-tien", 16, 0),
 )
 
 

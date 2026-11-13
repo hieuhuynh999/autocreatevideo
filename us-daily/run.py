@@ -728,7 +728,7 @@ async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
     import edge_tts
 
     last_error: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(7):
         voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
         audio = bytearray()
         words: list[tuple[float, float, str]] = []
@@ -744,13 +744,13 @@ async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
                         words.append((start, end, token))
         except Exception as exc:
             last_error = exc
-            await asyncio.sleep(2 * (attempt + 1))
+            await asyncio.sleep(10 * (attempt + 1))
             continue
         if audio and words:
             dest.write_bytes(bytes(audio))
             return words
         last_error = RuntimeError("no audio")
-        await asyncio.sleep(2 * (attempt + 1))
+        await asyncio.sleep(10 * (attempt + 1))
     raise RuntimeError("không nhận được giọng đọc") from last_error
 
 

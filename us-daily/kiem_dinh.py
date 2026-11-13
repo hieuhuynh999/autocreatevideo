@@ -1,12 +1,14 @@
-"""Kiểm định bốn video trước khi mở Studio, và so tiêu đề với kênh đối thủ.
+"""Kiểm định hai Short trước khi mở Studio, và so với Short của kênh đối thủ.
 
-Lỗi chặn (không đăng): thiếu file, sai khung hình, quá ngắn hoặc quá dài,
-không có tiếng, tiếng gần như im, hình đen, tiêu đề quá 100 ký tự, bài tiền
-không có số hoặc thiếu câu "not personal financial advice", bản tin không
-nêu tên báo, Short thiếu #Shorts.
+Lỗi chặn (không đăng): thiếu file, khác 1080x1920, dưới 29 fps, ngoài 15–59
+giây, không có tiếng, độ to ngoài -20 đến -9 LUFS, hình đen, chữ nằm ngoài
+vùng an toàn của điện thoại, chữ chạy nhỏ hơn cỡ tối thiểu, chữ bị rút gọn,
+tiêu đề quá 100 ký tự, bài tiền không có số hoặc thiếu câu "not personal
+financial advice", Short tin không nêu tên báo, thiếu #Shorts.
 
 So với đối thủ (chỉ cảnh báo, ghi vào mail): độ dài tiêu đề và tỉ lệ tiêu đề
-có chữ số, lấy từ RSS công khai của các kênh cùng ngách.
+có chữ số từ RSS công khai; độ dài video và độ to so với Short đối thủ đã đo
+trong doi_thu_short.json (chạy lại do_doi_thu.py để cập nhật).
 """
 
 from __future__ import annotations
@@ -28,12 +30,12 @@ RIVALS = {
     "tien": ("@EconomicsExplained", "@moneyguyshow", "@GrahamStephan"),
 }
 RULES = {
-    "tin": {"shape": (1280, 720), "min": 60, "max": 1800},
-    "tien": {"shape": (1280, 720), "min": 40, "max": 1800},
-    "short-tin": {"shape": (1080, 1920), "min": 10, "max": 60},
-    "short-tien": {"shape": (1080, 1920), "min": 10, "max": 60},
+    "short-tin": {"shape": (1080, 1920), "min": 15, "max": 59},
+    "short-tien": {"shape": (1080, 1920), "min": 15, "max": 59},
 }
 OUTLETS = ("PBS", "NPR", "New York Times")
+LUFS_RANGE = (-20.0, -9.0)
+BENCHMARK = Path(__file__).with_name("doi_thu_short.json")
 
 
 def _ffmpeg() -> str:
@@ -53,18 +55,63 @@ def _probe(path: Path) -> dict:
     size = re.search(r"Video:.*?(\d{3,5})x(\d{3,5})", text)
     if size:
         info["size"] = (int(size.group(1)), int(size.group(2)))
+    fps = re.search(r"(\d+(?:\.\d+)?) fps", text)
+    info["fps"] = float(fps.group(1)) if fps else None
     return info
 
 
 def _loudness(path: Path) -> float | None:
     proc = subprocess.run(
-        [_ffmpeg(), "-i", str(path), "-af", "volumedetect", "-vn", "-f", "null", "-"],
+        [_ffmpeg(), "-i", str(path), "-af", "ebur128", "-vn", "-f", "null", "-"],
         capture_output=True,
         text=True,
         errors="replace",
     )
-    match = re.search(r"mean_volume: (-?\d+(?:\.\d+)?) dB", proc.stderr)
-    return float(match.group(1)) if match else None
+    found = re.findall(r"I:\s+(-?\d+(?:\.\d+)?) LUFS", proc.stderr)
+    return float(found[-1]) if found else None
+
+
+def _inside(box, layout: dict) -> bool:
+    top, low = layout["top_zone"], layout["low_zone"]
+    x0, y0, x1, y1 = box
+    if x0 < top[0] or y0 < top[1] or y1 > low[3]:
+        return False
+    if y1 <= top[3]:
+        return x1 <= top[2]
+    return x1 <= low[2]
+
+
+def _layout_problems(path: Path) -> tuple[list[str], list[str]]:
+    """Đọc khung chữ đã vẽ. Đo lại vùng an toàn thay vì tin cờ của bộ dựng."""
+    file = path.with_suffix(".layout.json")
+    if not file.exists():
+        return ["thiếu file đo bố cục chữ"], []
+    layout = json.loads(file.read_text(encoding="utf-8"))
+    bad, warn = [], []
+    outside = [item for item in layout["elements"] if not _inside(item["box"], layout)]
+    for item in outside[:3]:
+        bad.append(f"chữ ra ngoài vùng an toàn: «{item['text'][:40]}» ở {item['box']}")
+    small = [item for item in layout["elements"] if item["kind"] == "caption" and item["size"] < layout["caption_min"]]
+    if small:
+        bad.append(f"chữ chạy cỡ {min(item['size'] for item in small)}, dưới {layout['caption_min']}")
+    for text in layout.get("warnings", []):
+        bad.append(text)
+    captions = [item for item in layout["elements"] if item["kind"] == "caption"]
+    if not captions:
+        bad.append("không có chữ chạy")
+    for scene in layout.get("scenes", []):
+        if scene.get("low_res"):
+            warn.append(f"ảnh {scene.get('outlet')} độ phân giải thấp")
+    return bad, warn
+
+
+def _benchmark() -> dict:
+    if not BENCHMARK.exists():
+        return {}
+    try:
+        return json.loads(BENCHMARK.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _dark_frames(path: Path, duration: float) -> int:
@@ -135,14 +182,7 @@ def rivals(folder: Path) -> dict[str, dict]:
 
 
 def _slot(item: dict) -> str:
-    name = Path(item["file"]).name
-    if name.startswith("short-tin"):
-        return "short-tin"
-    if name.startswith("short-tien"):
-        return "short-tien"
-    if name.startswith("tai-chinh"):
-        return "tien"
-    return "tin"
+    return "short-tien" if Path(item["file"]).name.startswith("short-tien") else "short-tin"
 
 
 def check(folder: Path) -> tuple[bool, str]:
@@ -151,6 +191,7 @@ def check(folder: Path) -> tuple[bool, str]:
         return False, "KIỂM ĐỊNH: thiếu lich.json, chưa có gì để đăng."
     items = json.loads(manifest.read_text(encoding="utf-8"))
     board = rivals(folder)
+    bench = _benchmark()
     lines = ["KIỂM ĐỊNH TRƯỚC KHI ĐĂNG"]
     blocking = 0
     seen = set()
@@ -172,28 +213,45 @@ def check(folder: Path) -> tuple[bool, str]:
                 bad.append(f"khung {info['size']}, cần {rule['shape'][0]}x{rule['shape'][1]}")
             if length < rule["min"] or length > rule["max"]:
                 bad.append(f"dài {length:.0f}s, cần {rule['min']}–{rule['max']}s")
+            if not info["fps"] or info["fps"] < 29:
+                bad.append(f"{info['fps']} fps, cần ít nhất 29")
+            loud = None
             if not info["audio"]:
                 bad.append("không có tiếng")
             else:
                 loud = _loudness(path)
-                if loud is None or loud < -40:
-                    bad.append(f"tiếng gần như im ({loud} dB)")
+                if loud is None or not (LUFS_RANGE[0] <= loud <= LUFS_RANGE[1]):
+                    bad.append(f"độ to {loud} LUFS, cần {LUFS_RANGE[0]:.0f} đến {LUFS_RANGE[1]:.0f}")
             if length and _dark_frames(path, length) >= 2:
                 bad.append("hình đen ở nhiều đoạn")
+            layout_bad, layout_warn = _layout_problems(path)
+            bad += layout_bad
+            warn += layout_warn
+            mark = bench.get("tin" if slot == "short-tin" else "tien") or {}
+            if mark.get("duration_median"):
+                low, high = mark["duration_low"], mark["duration_high"]
+                if length > high + 10 or length < low - 10:
+                    warn.append(f"dài {length:.0f}s, Short đối thủ {low:.0f}–{high:.0f}s (trung vị {mark['duration_median']:.0f}s)")
+                else:
+                    warn.append(f"dài {length:.0f}s, trong khoảng Short đối thủ {low:.0f}–{high:.0f}s")
+            if loud is not None and mark.get("lufs_median") is not None:
+                warn.append(
+                    f"độ to {loud:.1f} LUFS, đối thủ trung vị {mark['lufs_median']:.1f}; YouTube phát mọi video ở khoảng -14, video to hơn sẽ bị hạ xuống"
+                )
         if not title or len(title) > 100:
             bad.append(f"tiêu đề {len(title)} ký tự, cần 1–100")
-        if slot in ("tien", "short-tien"):
+        if slot == "short-tien":
             if not re.search(r"\d", title):
                 bad.append("tiêu đề bài tiền không có chữ số")
             if "not personal financial advice" not in description.lower():
                 bad.append("mô tả thiếu câu not personal financial advice")
-        if slot == "tin" and not any(name in description for name in OUTLETS):
-            bad.append("mô tả bản tin không nêu PBS, NPR hay New York Times")
-        if slot.startswith("short") and "#Shorts" not in title + description:
+        if slot == "short-tin" and not any(name in description for name in OUTLETS):
+            bad.append("mô tả Short tin không nêu PBS, NPR hay New York Times")
+        if "#Shorts" not in title + description:
             bad.append("Short thiếu #Shorts")
-        rival = board.get("tin" if slot in ("tin", "short-tin") else "tien")
-        if rival and not slot.startswith("short"):
-            plain = len(title)
+        rival = board.get("tin" if slot == "short-tin" else "tien")
+        if rival:
+            plain = len(title.replace(" #Shorts", ""))
             if plain < rival["low"] or plain > rival["high"]:
                 warn.append(
                     f"tiêu đề {plain} ký tự, đối thủ thường {rival['low']}–{rival['high']} (trung vị {rival['median']:.0f})"
@@ -221,6 +279,16 @@ def check(folder: Path) -> tuple[bool, str]:
     else:
         lines.append("")
         lines.append("Không đọc được RSS đối thủ hôm nay. Chỉ áp các lỗi chặn.")
+    if bench:
+        lines.append("Short đối thủ đã đo (do_doi_thu.py):")
+        for kind, data in bench.items():
+            if not data.get("count"):
+                continue
+            label = "tin" if kind == "tin" else "tiền"
+            lines.append(
+                f"- {label}: {', '.join(data['channels'])}; {data['count']} Short, dài {data['duration_low']:.0f}–{data['duration_high']:.0f}s "
+                f"(trung vị {data['duration_median']:.0f}s), độ to trung vị {data['lufs_median']} LUFS"
+            )
     ok = blocking == 0
     lines.append("")
     lines.append("KẾT LUẬN: ĐẠT, được đăng." if ok else f"KẾT LUẬN: {blocking} video bị chặn, không đăng ngày này.")
