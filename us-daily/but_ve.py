@@ -206,26 +206,64 @@ def _active(cues, second: float) -> tuple[list[tuple[float, float, str]], int]:
     return [], 0
 
 
-POSTERS = {
-    "intro": ((92, 26, 168), "THURSDAY", "ONE LINE", "MATTERS", (255, 214, 40)),
-    "00": ((16, 58, 150), "DEMOCRATS", "TOOK", "BOTH", (255, 214, 40)),
-    "01": ((150, 22, 28), "TRUMP'S", "TEAM", "COLLAPSED", (255, 255, 255)),
-    "02": ((18, 18, 22), "DYLAN", "MEETS", "THE POPE", (255, 196, 40)),
-    "03": ((12, 86, 176), "AFTER THE", "BLUE", "WAVE", (120, 230, 255)),
-    "04": ((120, 36, 18), "VANCE", "BLAMES", "IRAN", (255, 214, 40)),
-    "05": ((24, 24, 28), "HONG KONG", "SENTENCE", "10 YEARS", (255, 214, 40)),
-    "end": ((92, 26, 168), "REMEMBER", "ONE", "SENTENCE", (255, 214, 40)),
+POSTERS: dict = {}
+OUTLET: dict = {}
+PALETTE = (
+    ((16, 58, 150), (255, 214, 40)),
+    ((150, 22, 28), (255, 255, 255)),
+    ((18, 86, 48), (255, 214, 40)),
+    ((12, 86, 176), (120, 230, 255)),
+    ((120, 36, 18), (255, 214, 40)),
+    ((24, 24, 28), (255, 214, 40)),
+)
+OUTLET_LABEL = {
+    "PBS NewsHour": "PBS NEWSHOUR",
+    "New York Times": "NEW YORK TIMES",
+    "NPR": "NPR",
 }
-OUTLET = {
-    "intro": "U.S. BRIEFING",
-    "00": "PBS NEWSHOUR",
-    "01": "NEW YORK TIMES",
-    "02": "NPR",
-    "03": "PBS NEWSHOUR",
-    "04": "NEW YORK TIMES",
-    "05": "NPR",
-    "end": "U.S. BRIEFING",
-}
+
+
+def _chunks(title: str) -> tuple[str, str, str]:
+    """Ba dòng chữ lớn lấy từ tiêu đề báo, không dùng câu của ngày khác."""
+    title = title.replace("’", "'").replace("‘", "'").replace("`", "'")
+    raw = re.findall(r"[A-Za-z0-9][A-Za-z0-9'$%-]*", title)
+    skip = {"a", "an", "the", "of", "to", "and", "in", "on", "for", "watch", "heres", "here's"}
+    words: list[str] = []
+    for word in raw:
+        if not words and word.lower() in skip:
+            continue
+        words.append(word.upper())
+        if len(words) >= 6:
+            break
+    if len(words) < 3:
+        words = (words + ["U.S.", "NEWS", "BRIEF"])[:3]
+    size = max(1, (len(words) + 2) // 3)
+    lines = [" ".join(words[index : index + size]) for index in range(0, len(words), size)][:3]
+    while len(lines) < 3:
+        lines.append("")
+    return lines[0], lines[1], lines[2]
+
+
+def _load_cards() -> None:
+    global POSTERS, OUTLET
+    news = DAY.parent / "news.txt"
+    text = news.read_text(encoding="utf-8") if news.exists() else ""
+    found = re.findall(r"^\d+\.\s+(PBS NewsHour|New York Times|NPR):\s+(.+)$", text, re.M)
+    posters: dict = {}
+    outlets: dict = {}
+    lead = found[0][1] if found else "U.S. briefing"
+    top, mid, key = _chunks(lead)
+    posters["intro"] = (PALETTE[0][0], top, mid, key, PALETTE[0][1])
+    outlets["intro"] = "U.S. BRIEFING"
+    for index, (outlet, title) in enumerate(found):
+        name = f"{index:02d}"
+        background, accent = PALETTE[index % len(PALETTE)]
+        posters[name] = (background, *_chunks(title), accent)
+        outlets[name] = OUTLET_LABEL.get(outlet, outlet.upper())
+    posters["end"] = (PALETTE[0][0], "REMEMBER", "ONE", "SENTENCE", PALETTE[0][1])
+    outlets["end"] = "U.S. BRIEFING"
+    POSTERS = posters
+    OUTLET = outlets
 INK_COLOR = (255, 214, 40)
 SKIN = (235, 201, 170)
 OX, OY = 128, 408
@@ -315,6 +353,7 @@ def _prepare() -> None:
     lead = "00" if "00" in PHOTOS else "capitol"
     DEFAULT_PHOTO["intro"] = lead
     DEFAULT_PHOTO["end"] = lead
+    _load_cards()
 
 
 def _clip_names() -> list[str]:

@@ -13,7 +13,7 @@ Reply to the user in Vietnamese. Spoken words in the videos stay English.
 
 Each New York day is one news video and two money explainers. Do not publish, upload, or schedule anything on YouTube, TikTok, or email. Keys stay in `.env` and are never printed.
 
-The scheduled channel pack is different: since 2026-11-13 it is Shorts only. `us-daily/lam_short.py` builds two native 1080x1920 Shorts under 58 seconds (news at 8:00, money at 16:00 Eastern), and `us-daily/kiem_dinh.py` blocks any Short whose text leaves the phone safe zone recorded in `short-*.layout.json`. Do not go back to cutting Shorts out of a 1280x720 video.
+The scheduled channel pack is four videos: a 1280x720 briefing, one money video from `us-daily/lich.py`, and two 1080x1920 Shorts cut from about the first 35 seconds of those videos. Public times are 8:00, 12:00, 16:00, and 20:00 America/New_York, in that order. `us-daily/job.py --dang` schedules them with the YouTube token and does not type a Google password.
 
 ## Which video
 
