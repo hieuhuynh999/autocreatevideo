@@ -131,19 +131,33 @@ def schedule(folder: Path) -> int:
             "YOUTUBE_CLIENT_SECRET và YOUTUBE_REFRESH_TOKEN. Không gõ mật khẩu."
         )
         return 0
+    posted_path = folder / "da-dang.txt"
+    posted = posted_path.read_text(encoding="utf-8").splitlines() if posted_path.exists() else []
+    last_at = None
+    scheduled = 0
     for item in items:
         path = Path(item["file"])
         if not path.exists():
             print(f"Thiếu file, bỏ qua: {path.name}")
             continue
+        when = datetime.fromisoformat(_soon_enough(item["publish_at"]))
+        if last_at is not None and when < last_at + timedelta(minutes=30):
+            when = last_at + timedelta(minutes=30)
+        item = dict(item)
+        item["publish_at"] = when.astimezone(NY).isoformat()
+        last_at = when
         try:
             link = _upload(token, item)
         except urllib.error.HTTPError:
             print(f"YouTube từ chối {path.name}. Không in nội dung lỗi.")
             return 1
         print(f"Đã hẹn {path.name}: {link}")
+        if path.name not in posted:
+            posted.append(path.name)
+            posted_path.write_text("\n".join(posted) + "\n", encoding="utf-8")
+        scheduled += 1
     print(f"Kênh {CHANNEL}")
-    return 0
+    return 0 if scheduled == len(items) and scheduled >= 4 else 1
 
 
 def main() -> int:
