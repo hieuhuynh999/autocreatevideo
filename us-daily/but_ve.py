@@ -207,25 +207,91 @@ def _active(cues, second: float) -> tuple[list[tuple[float, float, str]], int]:
 
 
 POSTERS = {
-    "intro": ((92, 26, 168), "THURSDAY", "ONE LINE", "MATTERS", (255, 214, 40)),
-    "00": ((16, 58, 150), "DEMOCRATS", "TOOK", "BOTH", (255, 214, 40)),
-    "01": ((150, 22, 28), "TRUMP'S", "TEAM", "COLLAPSED", (255, 255, 255)),
-    "02": ((18, 18, 22), "DYLAN", "MEETS", "THE POPE", (255, 196, 40)),
-    "03": ((12, 86, 176), "AFTER THE", "BLUE", "WAVE", (120, 230, 255)),
-    "04": ((120, 36, 18), "VANCE", "BLAMES", "IRAN", (255, 214, 40)),
-    "05": ((24, 24, 28), "HONG KONG", "SENTENCE", "10 YEARS", (255, 214, 40)),
+    "intro": ((92, 26, 168), "U.S.", "NEWS", "BRIEFING", (255, 214, 40)),
     "end": ((92, 26, 168), "REMEMBER", "ONE", "SENTENCE", (255, 214, 40)),
 }
 OUTLET = {
     "intro": "U.S. BRIEFING",
-    "00": "PBS NEWSHOUR",
-    "01": "NEW YORK TIMES",
-    "02": "NPR",
-    "03": "PBS NEWSHOUR",
-    "04": "NEW YORK TIMES",
-    "05": "NPR",
     "end": "U.S. BRIEFING",
 }
+_STOP = {
+    "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "as", "at", "by",
+    "with", "after", "from", "into", "its", "their", "his", "her", "is", "are",
+    "was", "were", "be", "been", "that", "this", "it", "over", "under",
+}
+_PALETTE = (
+    ((16, 58, 150), (255, 214, 40)),
+    ((150, 22, 28), (255, 255, 255)),
+    ((18, 18, 22), (255, 196, 40)),
+    ((12, 86, 176), (120, 230, 255)),
+    ((120, 36, 18), (255, 214, 40)),
+    ((24, 24, 28), (255, 214, 40)),
+)
+
+
+def _punch(title: str) -> tuple[str, str, str]:
+    raw = re.findall(r"[A-Za-z0-9$%]+(?:'[A-Za-z]+)?", title)
+    words = [word.upper() for word in raw]
+    strong = [word for word in words if word.lower() not in _STOP]
+    chosen = (strong or words)[:8]
+    if len(chosen) < 3:
+        chosen = (chosen + ["U.S.", "NEWS", "TODAY"])[:3]
+    count = len(chosen)
+    first = max(1, count // 3)
+    second = max(first + 1, (2 * count) // 3)
+    lines = [" ".join(chosen[:first]), " ".join(chosen[first:second]), " ".join(chosen[second:])]
+    return tuple(line or "TODAY" for line in lines)  # type: ignore[return-value]
+
+
+def _bug(outlet: str) -> str:
+    if outlet.startswith("PBS"):
+        return "PBS NEWSHOUR"
+    if "York" in outlet:
+        return "NEW YORK TIMES"
+    if outlet.startswith("NPR"):
+        return "NPR"
+    return "U.S. BRIEFING"
+
+
+def _apply_day_lines() -> None:
+    """Chữ lớn lấy tiêu đề PBS, New York Times và NPR của đúng ngày, không giữ tin cũ."""
+    weekday = "TODAY"
+    stamp = os.environ.get("US_DAILY_DAY", "")
+    if stamp:
+        weekday = datetime.strptime(stamp, "%Y-%m-%d").strftime("%A").upper()
+    else:
+        weekday = datetime.now(ZoneInfo("America/New_York")).strftime("%A").upper()
+    POSTERS.clear()
+    OUTLET.clear()
+    POSTERS["intro"] = ((92, 26, 168), weekday, "U.S.", "BRIEFING", (255, 214, 40))
+    POSTERS["end"] = ((92, 26, 168), "REMEMBER", "ONE", "SENTENCE", (255, 214, 40))
+    OUTLET["intro"] = "U.S. BRIEFING"
+    OUTLET["end"] = "U.S. BRIEFING"
+    news = DAY.parent / "news.txt"
+    found = []
+    if news.exists():
+        found = re.findall(
+            r"^\d+\.\s+(PBS NewsHour|New York Times|NPR):\s+(.+)$",
+            news.read_text(encoding="utf-8"),
+            re.M,
+        )
+    for index in range(6):
+        name = f"{index:02d}"
+        fill, ink = _PALETTE[index % len(_PALETTE)]
+        if index < len(found):
+            outlet, title = found[index]
+            top, mid, key = _punch(title)
+            OUTLET[name] = _bug(outlet)
+        else:
+            top, mid, key = "U.S.", "NEWS", "TODAY"
+            OUTLET[name] = "U.S. BRIEFING"
+        POSTERS[name] = (fill, top, mid, key, ink)
+    LABELS.clear()
+    LABELS["intro"] = weekday
+    LABELS["end"] = "ONE SENTENCE"
+    for index in range(6):
+        name = f"{index:02d}"
+        LABELS[name] = " ".join(POSTERS[name][1:4])
 INK_COLOR = (255, 214, 40)
 SKIN = (235, 201, 170)
 OX, OY = 128, 408
@@ -315,6 +381,7 @@ def _prepare() -> None:
     lead = "00" if "00" in PHOTOS else "capitol"
     DEFAULT_PHOTO["intro"] = lead
     DEFAULT_PHOTO["end"] = lead
+    _apply_day_lines()
 
 
 def _clip_names() -> list[str]:
@@ -446,10 +513,11 @@ def _spoken(events, second: float) -> tuple[str, str | None, float | None, str]:
 
 
 def _frame(name: str, second: float, duration: float, cues) -> Image.Image:
-    _bg, top, mid, key, key_color = POSTERS.get(name, ((18, 18, 22), "U.S.", "STORY", name, (255, 214, 40)))
+    _bg, top, mid, key, key_color = POSTERS.get(name, ((18, 18, 22), "U.S.", "NEWS", "TODAY", (255, 214, 40)))
     events = _events(cues)
     token, kind, started, photo_key = _spoken(events, second)
-    photo_name = photo_key or DEFAULT_PHOTO.get(name, "capitol")
+    # Ảnh của đúng bài báo. Chân dung và Điện Capitol chỉ dùng khi clip không có ảnh bài.
+    photo_name = DEFAULT_PHOTO.get(name) or photo_key or "capitol"
     if photo_name not in PHOTOS:
         photo_name = "capitol"
     image = PHOTOS[photo_name].copy()

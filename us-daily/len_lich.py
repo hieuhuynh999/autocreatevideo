@@ -142,6 +142,11 @@ def schedule(folder: Path) -> int:
             print(f"YouTube từ chối {path.name}. Không in nội dung lỗi.")
             return 1
         print(f"Đã hẹn {path.name}: {link}")
+        done = folder / "da-dang.txt"
+        already = done.read_text(encoding="utf-8").splitlines() if done.exists() else []
+        if path.name not in already:
+            already.append(path.name)
+            done.write_text("\n".join(already) + "\n", encoding="utf-8")
     print(f"Kênh {CHANNEL}")
     return 0
 

@@ -15,14 +15,16 @@ Do not publish, upload, or schedule anything on YouTube, TikTok, or email unless
 
 ## Daily pack (current)
 
-Since 2026-11-13 the scheduled pack is **Shorts only**:
+Since 2026-11-15 the scheduled pack is four videos. `python -u us-daily/job.py --now --dang` builds them. `--dang` calls `us-daily/len_lich.py` with `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, and `YOUTUBE_REFRESH_TOKEN`. It does not open Chrome and does not type a Google password. If any of those three is missing, leave the four files plus `youtube-YYYY-MM-DD.txt` in artifacts and stop. Do not print tokens. Do not commit video or `.env`.
 
 | Slot (Eastern) | File | Job |
 |---|---|---|
-| 8:00 | `short-tin.mp4` | Top U.S. stories of the day, ranked and hooked |
-| 16:00 | `short-tien.mp4` | One money/housing number from the 30-day calendar |
+| 8:00 | `vi-du-but.mp4` | 1280×720 U.S. briefing, article photos from PBS NewsHour, New York Times, and NPR |
+| 12:00 | `short-tin.mp4` | 1080×1920 cut of about the first 35 seconds |
+| 16:00 | `tai-chinh-1.mp4` | 1280×720 money, housing, or economy row for that New York date in `lich.py` |
+| 20:00 | `short-tien.mp4` | 1080×1920 cut of about the first 35 seconds |
 
-Built by `us-daily/lam_short.py`. Verified by `us-daily/kiem_dinh.py` (1080×1920, 15–59s, ≥29 fps, loudness, safe-zone text). Do **not** cut Shorts out of a 1280×720 long video.
+Order on channel `UCE056WfiFMV6k4N5irnIDnA`: briefing, news Short, money video, money Short. Mark not made for kids. Big on-screen words come from that day's headlines, and the article photo stays on screen.
 
 Retention, hooks, and rival-beat rules live in [retention.md](retention.md). The latest high-view rival snapshot is [rival-compare.md](rival-compare.md). Read both before changing scripts or layout.
 
@@ -68,4 +70,4 @@ Read [sources.md](sources.md) before adding a tool. Defaults:
 python us-daily/kiem_dinh.py output/us-daily/YYYY-MM-DD
 ```
 
-`ĐẠT` means both Shorts present and every blocking check passed. Fix named errors and run again.
+`ĐẠT` means the four scheduled videos are present and every blocking check passed. Fix named errors and run again.
