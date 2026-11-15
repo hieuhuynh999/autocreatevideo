@@ -33,6 +33,12 @@ RULES = {
     "short-tin": {"shape": (1080, 1920), "min": 15, "max": 59},
     "short-tien": {"shape": (1080, 1920), "min": 15, "max": 59},
 }
+BROADCAST_RULES = {
+    "tin": {"shape": (1280, 720), "min": 60, "max": 1800},
+    "tien": {"shape": (1280, 720), "min": 40, "max": 1800},
+    "short-tin": {"shape": (1080, 1920), "min": 10, "max": 60},
+    "short-tien": {"shape": (1080, 1920), "min": 10, "max": 60},
+}
 OUTLETS = ("PBS", "NPR", "New York Times")
 LUFS_RANGE = (-20.0, -9.0)
 BENCHMARK = Path(__file__).with_name("doi_thu_short.json")
@@ -58,6 +64,17 @@ def _probe(path: Path) -> dict:
     fps = re.search(r"(\d+(?:\.\d+)?) fps", text)
     info["fps"] = float(fps.group(1)) if fps else None
     return info
+
+
+def _mean_volume(path: Path) -> float | None:
+    proc = subprocess.run(
+        [_ffmpeg(), "-i", str(path), "-af", "volumedetect", "-vn", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    match = re.search(r"mean_volume: (-?\d+(?:\.\d+)?) dB", proc.stderr)
+    return float(match.group(1)) if match else None
 
 
 def _loudness(path: Path) -> float | None:
@@ -182,7 +199,103 @@ def rivals(folder: Path) -> dict[str, dict]:
 
 
 def _slot(item: dict) -> str:
-    return "short-tien" if Path(item["file"]).name.startswith("short-tien") else "short-tin"
+    name = Path(item["file"]).name
+    if name.startswith("short-tien"):
+        return "short-tien"
+    if name.startswith("short-tin"):
+        return "short-tin"
+    if name.startswith("tai-chinh"):
+        return "tien"
+    if name.startswith("vi-du"):
+        return "tin"
+    return "short-tin"
+
+
+def _broadcast(items: list[dict]) -> bool:
+    names = {Path(item["file"]).name for item in items}
+    return bool(names & {"vi-du-but.mp4", "vi-du-tin.mp4", "tai-chinh-1.mp4"})
+
+
+def _check_broadcast(folder: Path, items: list[dict]) -> tuple[bool, str]:
+    board = rivals(folder)
+    lines = ["KIỂM ĐỊNH TRƯỚC KHI ĐĂNG"]
+    blocking = 0
+    seen = set()
+    for item in items:
+        slot = _slot(item)
+        seen.add(slot)
+        rule = BROADCAST_RULES.get(slot)
+        path = Path(item["file"])
+        title = item.get("title", "")
+        description = item.get("description", "")
+        bad: list[str] = []
+        warn: list[str] = []
+        if rule is None:
+            bad.append(f"không có luật cho {slot}")
+        elif not path.exists():
+            bad.append("thiếu file")
+        else:
+            info = _probe(path)
+            length = info["duration"] or 0
+            if info["size"] != rule["shape"]:
+                bad.append(f"khung {info['size']}, cần {rule['shape'][0]}x{rule['shape'][1]}")
+            if length < rule["min"] or length > rule["max"]:
+                bad.append(f"dài {length:.0f}s, cần {rule['min']}–{rule['max']}s")
+            if not info["audio"]:
+                bad.append("không có tiếng")
+            else:
+                loud = _mean_volume(path)
+                if loud is None or loud < -40:
+                    bad.append(f"tiếng gần như im ({loud} dB)")
+            if length and _dark_frames(path, length) >= 2:
+                bad.append("hình đen ở nhiều đoạn")
+        if not title or len(title) > 100:
+            bad.append(f"tiêu đề {len(title)} ký tự, cần 1–100")
+        if slot in ("tien", "short-tien"):
+            if not re.search(r"\d", title):
+                bad.append("tiêu đề bài tiền không có chữ số")
+            if "not personal financial advice" not in description.lower():
+                bad.append("mô tả thiếu câu not personal financial advice")
+        if slot == "tin" and not any(name in description for name in OUTLETS):
+            bad.append("mô tả bản tin không nêu PBS, NPR hay New York Times")
+        if slot.startswith("short") and "#Shorts" not in title + description:
+            bad.append("Short thiếu #Shorts")
+        rival = board.get("tin" if slot in ("tin", "short-tin") else "tien")
+        if rival and not slot.startswith("short"):
+            plain = len(title)
+            if plain < rival["low"] or plain > rival["high"]:
+                warn.append(
+                    f"tiêu đề {plain} ký tự, đối thủ thường {rival['low']}–{rival['high']} (trung vị {rival['median']:.0f})"
+                )
+            if rival["digit_share"] >= 0.5 and not re.search(r"\d", title):
+                warn.append(f"{rival['digit_share']:.0%} tiêu đề đối thủ có chữ số, tiêu đề này không có")
+        status = "ĐẠT" if not bad else "CHẶN"
+        blocking += bool(bad)
+        lines.append(f"- {path.name} [{status}] {title}")
+        lines += [f"    lỗi: {text}" for text in bad]
+        lines += [f"    so đối thủ: {text}" for text in warn]
+    for slot in BROADCAST_RULES:
+        if slot not in seen:
+            lines.append(f"- thiếu video {slot} [CHẶN]")
+            blocking += 1
+    if board:
+        lines.append("")
+        lines.append("Đối thủ đã đọc (RSS công khai, 15 video mới nhất mỗi kênh):")
+        for kind, data in board.items():
+            label = "bản tin" if kind == "tin" else "bài tiền"
+            lines.append(
+                f"- {label}: {', '.join(data['channels'])}; {data['count']} tiêu đề, "
+                f"trung vị {data['median']:.0f} ký tự, {data['digit_share']:.0%} có chữ số"
+            )
+    else:
+        lines.append("")
+        lines.append("Không đọc được RSS đối thủ hôm nay. Chỉ áp các lỗi chặn.")
+    ok = blocking == 0
+    lines.append("")
+    lines.append("KẾT LUẬN: ĐẠT, được đăng." if ok else f"KẾT LUẬN: {blocking} video bị chặn, không đăng ngày này.")
+    report = "\n".join(lines)
+    (folder / "kiem-dinh.txt").write_text(report + "\n", encoding="utf-8")
+    return ok, report
 
 
 def check(folder: Path) -> tuple[bool, str]:
@@ -190,6 +303,8 @@ def check(folder: Path) -> tuple[bool, str]:
     if not manifest.exists():
         return False, "KIỂM ĐỊNH: thiếu lich.json, chưa có gì để đăng."
     items = json.loads(manifest.read_text(encoding="utf-8"))
+    if _broadcast(items):
+        return _check_broadcast(folder, items)
     board = rivals(folder)
     bench = _benchmark()
     lines = ["KIỂM ĐỊNH TRƯỚC KHI ĐĂNG"]
