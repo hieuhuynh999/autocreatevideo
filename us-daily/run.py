@@ -463,8 +463,14 @@ def finance_one(when: datetime) -> dict:
     }
     key = row.get("key")
     if key in built:
-        return built[key]()
-    return _wrap(row["title"], row["number"], row["body"], row["source"])
+        item = built[key]()
+    else:
+        item = _wrap(row["title"], row["number"], row["body"], row["source"])
+    item["hook"] = row.get("hook", "")
+    item["banner"] = row.get("banner", "")
+    item["next_hook"] = row.get("next_hook", "")
+    item["next_banner"] = row.get("next_banner", "")
+    return item
 
 
 def _wrap(title: str, number: str, body: list[str], source: str) -> dict:

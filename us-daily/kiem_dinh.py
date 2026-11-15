@@ -258,10 +258,12 @@ def check(folder: Path) -> tuple[bool, str]:
                 bad.append("Short tin thiếu câu hook mở đầu")
             if slot == "short-tin" and "why it matters" not in spoken:
                 bad.append("Short tin thiếu câu re-hook why it matters")
-            if slot == "short-tien" and "if you keep one money number" not in spoken:
-                bad.append("Short tiền thiếu hook proof-first với con số")
-            if slot == "short-tien" and "this week" not in spoken:
-                bad.append("Short tiền thiếu việc làm trong tuần")
+            if slot == "short-tien":
+                has_hook = "if you keep one money number" in spoken or spoken.strip().endswith("?") or "?" in spoken.split("\n", 1)[0]
+                if not has_hook:
+                    bad.append("Short tiền thiếu câu hook mở đầu")
+                if "this week" not in spoken:
+                    bad.append("Short tiền thiếu việc làm trong tuần")
         rival = board.get("tin" if slot == "short-tin" else "tien")
         if rival:
             plain = len(title.replace(" #Shorts", ""))

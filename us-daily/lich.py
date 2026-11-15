@@ -30,7 +30,45 @@ def row_for(when: datetime) -> dict:
     if index < 0:
         index = 0
     row = ROWS[index % len(ROWS)]
-    return {"date": day.isoformat(), **row}
+    hook, banner = HOOKS[index % len(ROWS)]
+    upcoming, upcoming_banner = HOOKS[(index + 1) % len(ROWS)]
+    return {"date": day.isoformat(), **row, "hook": hook, "banner": banner, "next_hook": upcoming, "next_banner": upcoming_banner}
+
+
+# Câu mở đầu đọc ngay giây đầu, và dòng lời hứa nằm trên cùng suốt video.
+# Câu mở chỉ hỏi hoặc nêu hậu quả của đúng con số trong bài, không thêm số mới.
+HOOKS = [
+    ("How big should an emergency fund be?", "EMERGENCY FUND: HOW MUCH?"),
+    ("Where should a 4,000 dollar paycheck go?", "50/30/20 ON A $4,000 PAYCHECK"),
+    ("What does a 1,000 dollar card balance really cost?", "THE REAL COST OF A CARD BALANCE"),
+    ("What does 200 dollars a month add up to in ten years?", "$200 A MONTH FOR 10 YEARS"),
+    ("You have 100 extra dollars. Card or savings?", "CARD OR SAVINGS FIRST?"),
+    ("Do you know your real grocery number?", "YOUR REAL GROCERY WEEK"),
+    ("How much can you put in a 401(k) in 2026?", "THE 2026 401(k) LIMIT"),
+    ("How much can you put in an IRA in 2026?", "THE 2026 IRA LIMIT"),
+    ("How much more does a 401(k) allow than an IRA?", "401(k) VS IRA IN 2026"),
+    ("At 50, your 401(k) limit gets bigger. By how much?", "THE AGE 50 CATCH-UP"),
+    ("Ages 60 to 63 get a bigger catch-up than age 50.", "THE AGE 60 TO 63 CATCH-UP"),
+    ("What is the most that can go into a 401(k), employer money included?", "THE 2026 TOTAL PLAN CAP"),
+    ("Is your plan a SIMPLE IRA? The limit is lower.", "THE 2026 SIMPLE IRA LIMIT"),
+    ("How much cash is 20 percent down on a 300,000 dollar home?", "20% DOWN ON A $300K HOME"),
+    ("Can you buy a home with 3 percent down? Here is the cash.", "3% DOWN ON A $300K HOME"),
+    ("What does an FHA down payment look like in dollars?", "FHA 3.5% DOWN ON $300K"),
+    ("The down payment is not the only cash you need at closing.", "CLOSING COSTS ON $300K"),
+    ("What does one mortgage point cost?", "ONE POINT ON A $300K LOAN"),
+    ("What does a 300,000 dollar mortgage cost each month at 7.18 percent?", "$300K AT 7.18% PER MONTH"),
+    ("Fifteen years or thirty? Here is the monthly gap.", "15-YEAR VS 30-YEAR LOAN"),
+    ("Your mortgage bill is not one number. It can have four parts.", "WHAT'S INSIDE A MORTGAGE BILL"),
+    ("How much of a 4,000 dollar paycheck goes to Social Security and Medicare?", "FICA ON A $4,000 PAYCHECK"),
+    ("When is three months of savings not enough?", "THE 6-MONTH EMERGENCY FUND"),
+    ("Three months of savings feels impossible? Start here.", "THE FIRST SAVINGS TARGET"),
+    ("Is 50 dollars a month even worth saving?", "$50 A MONTH FOR 10 YEARS"),
+    ("Paying the minimum? See how little the balance drops.", "WHAT A MINIMUM PAYMENT DOES"),
+    ("What happens when you add 100 dollars to the minimum?", "MINIMUM PLUS $100"),
+    ("Rent is 1,800 dollars. Does 50/30/20 still work?", "WHEN RENT BREAKS 50/30/20"),
+    ("Four receipts tell you your real grocery bill.", "YOUR 4-RECEIPT GROCERY NUMBER"),
+    ("When does mortgage insurance start on a 300,000 dollar home?", "WHEN MORTGAGE INSURANCE STARTS"),
+]
 
 
 def _say(fact: str, counted: str, left_out: str, fails: str, week: str, source: str) -> list[str]:
@@ -366,3 +404,5 @@ ROWS = [
         ),
     },
 ]
+
+assert len(HOOKS) == len(ROWS), 'mỗi bài tiền cần một câu mở đầu'

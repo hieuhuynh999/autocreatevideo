@@ -686,7 +686,12 @@ def money_texts(item: dict) -> list[str]:
     week = next((line for line in lines if line.startswith("This week")), "")
     number = item["number"]
     facts = _split_sentences(fact)
-    hook = f"If you keep one money number this week, make it {number}."
+    # Ưu tiên câu hook trong lịch 30 ngày (tò mò / hậu quả). Fallback: proof-first với số.
+    hook = (item.get("hook") or "").strip()
+    if not hook:
+        hook = f"If you keep one money number this week, make it {number}."
+    elif not hook.endswith(("?", ".", "!")):
+        hook += "?"
     rehook = facts[0] if facts else f"Here is what {number} actually means."
     texts = [hook, rehook]
     if len(facts) > 1:
@@ -889,10 +894,12 @@ def build_money(when: datetime, folder: Path) -> dict:
     day = f"{when.strftime('%b').upper()} {when.day}"
     head = font("bold", 34)
     title = item["title"]
+    banner = (item.get("banner") or "").strip() or title.upper()
     source = re.split(r"[.,;]", item["source"])[0].strip()
     number_width = TOP_ZONE[2] - TOP_ZONE[0]
     number_face, _ = fit(main, "black", 200, 90, number_width, 1, stroke=6, layout=layout)
-    title_face, title_lines = fit(title, "bold", 50, 36, number_width, 2, layout=layout)
+    banner_face, banner_lines = fit(banner, "black", 48, 32, number_width, 2, stroke=3, layout=layout)
+    title_face, title_lines = fit(title, "bold", 44, 32, number_width, 2, layout=layout)
     source_face, source_lines = fit(f"Source: {source}", "text", 34, 26, number_width, 1, layout=layout)
 
     def frames():
@@ -908,9 +915,10 @@ def build_money(when: datetime, folder: Path) -> dict:
             pill(draw, f"MONEY MATH · {day}", head, TOP_ZONE[0], 240, GOLD, NAVY, layout, "header")
             pill(draw, f"{scene + 1}/{len(texts)}", head, 0, 240, (255, 255, 255, 40), WHITE, layout, "counter", right=TOP_ZONE[2])
             shown = _count_up(main, second / 0.9) if second < 0.9 else main
-            y = block(draw, [shown], number_face, TOP_ZONE[0], 330, layout, "number", fill=GOLD, stroke=6, stroke_fill=(60, 40, 0))
-            y = block(draw, title_lines, title_face, TOP_ZONE[0], y + 18, layout, "title")
-            block(draw, source_lines, source_face, TOP_ZONE[0], y + 10, layout, "source", fill=GREY)
+            y = block(draw, [shown], number_face, TOP_ZONE[0], 310, layout, "number", fill=GOLD, stroke=6, stroke_fill=(60, 40, 0))
+            y = block(draw, banner_lines, banner_face, TOP_ZONE[0], y + 8, layout, "banner", fill=YELLOW, stroke=3)
+            y = block(draw, title_lines, title_face, TOP_ZONE[0], y + 10, layout, "title")
+            block(draw, source_lines, source_face, TOP_ZONE[0], y + 8, layout, "source", fill=GREY)
             panel = (LOW_ZONE[0], 880, LOW_ZONE[2], 1160)
             draw.rounded_rectangle(panel, radius=28, fill=(255, 255, 255, 26), outline=(255, 255, 255, 60), width=2)
             pop = 0.7 + 0.3 * _ease(local / 0.25)
