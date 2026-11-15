@@ -1,0 +1,272 @@
+{
+  "tin": {
+    "channels": [
+      "@CBSNews",
+      "@NBCNews",
+      "@PBSNewsHour"
+    ],
+    "count": 9,
+    "duration_median": 47.0,
+    "duration_low": 31.0,
+    "duration_high": 75.0,
+    "lufs_median": -23.1,
+    "tall_share": 0.0,
+    "videos": [
+      {
+        "channel": "@NBCNews",
+        "id": "Kfw9nhOJ0tw",
+        "title": "Secretary Lutnick agrees to testify amid Nvidia scandal",
+        "duration": 47.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -22.1,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Kfw9nhOJ0tw-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Kfw9nhOJ0tw-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Kfw9nhOJ0tw-80.jpg"
+        ]
+      },
+      {
+        "channel": "@NBCNews",
+        "id": "31fPec8ShlU",
+        "title": "Van Hollen challenges Schumer for Senate majority leader",
+        "duration": 37.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -16.1,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-31fPec8ShlU-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-31fPec8ShlU-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-31fPec8ShlU-80.jpg"
+        ]
+      },
+      {
+        "channel": "@NBCNews",
+        "id": "Qb3BujNfeh8",
+        "title": "Some services slowly return after Microsoft outage",
+        "duration": 35.0,
+        "width": 202,
+        "height": 360,
+        "fps": 30,
+        "lufs": -22.2,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Qb3BujNfeh8-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Qb3BujNfeh8-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Qb3BujNfeh8-80.jpg"
+        ]
+      },
+      {
+        "channel": "@PBSNewsHour",
+        "id": "iwLzg6hEPY8",
+        "title": "Remembering 'Mike Hammer' actor Stacy Keach",
+        "duration": 75.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -23.8,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-iwLzg6hEPY8-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-iwLzg6hEPY8-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-iwLzg6hEPY8-80.jpg"
+        ]
+      },
+      {
+        "channel": "@PBSNewsHour",
+        "id": "m6sOg_lOibk",
+        "title": "Pro-Palestinian protesters target Biden in Ireland",
+        "duration": 69.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -23.1,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-m6sOg_lOibk-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-m6sOg_lOibk-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-m6sOg_lOibk-80.jpg"
+        ]
+      },
+      {
+        "channel": "@PBSNewsHour",
+        "id": "Efyv4ERIwIE",
+        "title": "Over 6,000 Italian schools receive e-mail bomb threats",
+        "duration": 71.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -22.6,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Efyv4ERIwIE-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Efyv4ERIwIE-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-Efyv4ERIwIE-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CBSNews",
+        "id": "sPkiZu1KDp4",
+        "title": "Democrat Scott Colom wins Mississippi Senate race in major upset, CBS News projects #shorts",
+        "duration": 54.0,
+        "width": 202,
+        "height": 360,
+        "fps": 30,
+        "lufs": -30.4,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-sPkiZu1KDp4-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-sPkiZu1KDp4-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-sPkiZu1KDp4-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CBSNews",
+        "id": "oSzsWywUwWI",
+        "title": "Nvidia’s board preparing to oust Huang amid Chinese spy affair scandal, sources say #shorts",
+        "duration": 45.0,
+        "width": 202,
+        "height": 360,
+        "fps": 30,
+        "lufs": -27.0,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-oSzsWywUwWI-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-oSzsWywUwWI-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-oSzsWywUwWI-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CBSNews",
+        "id": "aDp9-OM8JlY",
+        "title": "Watch: Man reacts to pregnant wife being rescued from Brooklyn building collapse #shorts",
+        "duration": 31.0,
+        "width": 202,
+        "height": 360,
+        "fps": 30,
+        "lufs": -29.6,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-aDp9-OM8JlY-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-aDp9-OM8JlY-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tin-aDp9-OM8JlY-80.jpg"
+        ]
+      }
+    ]
+  },
+  "tien": {
+    "channels": [
+      "@CNBCMakeIt",
+      "@GrahamStephan",
+      "@moneyguyshow"
+    ],
+    "count": 7,
+    "duration_median": 46.0,
+    "duration_low": 29.0,
+    "duration_high": 144.0,
+    "lufs_median": -14.0,
+    "tall_share": 0.0,
+    "videos": [
+      {
+        "channel": "@GrahamStephan",
+        "id": "OjDJGu_oLC0",
+        "title": "CRAZIEST TikTok Money Advice...",
+        "duration": 29.0,
+        "width": 360,
+        "height": 640,
+        "fps": 30,
+        "lufs": -11.0,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-OjDJGu_oLC0-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-OjDJGu_oLC0-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-OjDJGu_oLC0-80.jpg"
+        ]
+      },
+      {
+        "channel": "@moneyguyshow",
+        "id": "f6PciMBdpiw",
+        "title": "Are You Investing in the WRONG Account First?",
+        "duration": 46.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -11.3,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-f6PciMBdpiw-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-f6PciMBdpiw-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-f6PciMBdpiw-80.jpg"
+        ]
+      },
+      {
+        "channel": "@moneyguyshow",
+        "id": "82AKMs79Ub4",
+        "title": "How Coast FIRE Changed This Couple's Entire Life",
+        "duration": 36.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -12.4,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-82AKMs79Ub4-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-82AKMs79Ub4-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-82AKMs79Ub4-80.jpg"
+        ]
+      },
+      {
+        "channel": "@moneyguyshow",
+        "id": "w9N9H643RoY",
+        "title": "Would You Spend an Extra $200—or Save It Again?",
+        "duration": 41.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -14.0,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-w9N9H643RoY-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-w9N9H643RoY-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-w9N9H643RoY-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CNBCMakeIt",
+        "id": "QYtjHxAW_r4",
+        "title": "Do you think college is still worth it?",
+        "duration": 144.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -22.4,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-QYtjHxAW_r4-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-QYtjHxAW_r4-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-QYtjHxAW_r4-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CNBCMakeIt",
+        "id": "r6uBdm733Vg",
+        "title": "Everyone is obsessed with 'maxxing' — here's why",
+        "duration": 103.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -22.6,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-r6uBdm733Vg-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-r6uBdm733Vg-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien-r6uBdm733Vg-80.jpg"
+        ]
+      },
+      {
+        "channel": "@CNBCMakeIt",
+        "id": "-4n9iOcAEBM",
+        "title": "'Everyone laughed' when he started a pumpkin farm — now it brings in $2M/year",
+        "duration": 89.0,
+        "width": 202,
+        "height": 360,
+        "fps": 24,
+        "lufs": -15.3,
+        "stills": [
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien--4n9iOcAEBM-20.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien--4n9iOcAEBM-50.jpg",
+          "C:\\Users\\henry.hieu\\Desktop\\phim-ngan-ai\\output\\doi-thu-short\\tien--4n9iOcAEBM-80.jpg"
+        ]
+      }
+    ]
+  }
+}
