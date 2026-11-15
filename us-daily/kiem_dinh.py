@@ -249,6 +249,19 @@ def check(folder: Path) -> tuple[bool, str]:
             bad.append("mô tả Short tin không nêu PBS, NPR hay New York Times")
         if "#Shorts" not in title + description:
             bad.append("Short thiếu #Shorts")
+        script = path.with_suffix(".txt")
+        if script.exists():
+            spoken = script.read_text(encoding="utf-8").lower()
+            if slot == "short-tin" and not any(
+                spoken.startswith(prefix) for prefix in ("start with this", "the story u.s. outlets", "today's top u.s. story")
+            ):
+                bad.append("Short tin thiếu câu hook mở đầu")
+            if slot == "short-tin" and "why it matters" not in spoken:
+                bad.append("Short tin thiếu câu re-hook why it matters")
+            if slot == "short-tien" and "if you keep one money number" not in spoken:
+                bad.append("Short tiền thiếu hook proof-first với con số")
+            if slot == "short-tien" and "this week" not in spoken:
+                bad.append("Short tiền thiếu việc làm trong tuần")
         rival = board.get("tin" if slot == "short-tin" else "tien")
         if rival:
             plain = len(title.replace(" #Shorts", ""))

@@ -1,14 +1,19 @@
-# Sources checked on 2026-11-05
+# Sources checked
 
-| Repo the user named | Result | What this project uses |
+Updated 2026-11-15 for Shorts-only + retention.
+
+| Source | Result | What this project uses |
 |---|---|---|
-| itsPremkumar/Automated-Video-Generator | Exists. MIT. About 125 stars. | Edge-TTS voice, optional Pexels when `PEXELS_API_KEY` is set, burned-in captions only if the picture still matches the sentence. No `--post`. |
-| akshatkhatri/Video_generation_tool | Exists. Flask, MoviePy, Azure TTS, LLM catchy lines. | The shape only: one headline in, one short video out. Not Azure. Not catchy lines that change the fact. |
-| Likhithsai2580/Automated-YouTube-Video-Creator | Exists. MIT. Gemini, pyttsx3, screen record, YouTube upload. | Do not run it. Upload stays manual. |
-| codelucas/newspaper | Exists. MIT. This is newspaper3k. | Read one cited article. Do not paste the article into the video. |
-| babicmila/news-web-scraper | Exists. Selenium to CSV. README URL 404 at fetch time. | Do not add a second daily scraper. RSS in `us-daily/run.py` is the collector. |
-| drivesys/bar-chart-race | HTTP 404. | Do not clone it. |
-| dexplo/bar_chart_race | Exists. MIT. The maintained bar-chart-race library. | Use this when a sourced year-by-year table exists. |
-| kennethleungty/Fortune-Global-500-Bar-Chart-Race | Exists. Notebook plus Flourish. The full 26-year table is not in the repo. | Pattern only. Do not invent Fortune ranks. |
+| Spotlight-Revenue/short-form-video-script-writer | Public skill. Hooks, re-hooks, one idea, open loops, revision checklist. | Retention rules in `retention.md`. Do not paste their product examples into money scripts. |
+| xsrazy/fyp-skills (`video-hook`) | Public skill. Hook pattern families. | Pattern names only (result first, curiosity gap, contrast, numbered promise). English news/money wording stays ours. |
+| ReelsBot first-3-seconds / ViralMint hook study | Public research summaries. | Start mid-content; aim under ~30–58s; do not treat hook-formula lists as proof. |
+| HookSignals hook psychology | Public summary of curiosity gap / relevance / payoff. | Checklist language in `retention.md`. |
+| itsPremkumar/Automated-Video-Generator | MIT. | Edge-TTS pattern. No auto-post. |
+| akshatkhatri/Video_generation_tool | Exists. Azure + catchy LLM lines. | Shape only. Not Azure. Not catchy lines that change the fact. |
+| Likhithsai2580/Automated-YouTube-Video-Creator | MIT. Gemini upload path. | Do not run upload from that repo. |
+| codelucas/newspaper | MIT (newspaper3k). | Read one cited article. Do not paste the article into the video. |
+| dexplo/bar_chart_race | MIT. | Only with a sourced year table. |
+| drivesys/bar-chart-race | HTTP 404. | Do not clone. |
+| yt-dlp + Deno | Local install for rival Short measurement. | `do_doi_thu.py`, `phan_tich_doi_thu.py`. Never commit downloaded mp4s. |
 
-Stock and article photos stay the publisher's or the clip license's. Do not redraw a real person's face from a news photo. The cartoon host is the bean-head drawing in `cartoon/templates/bridge/toon.ts`, MIT, Copyright (c) 2026 Mr omi. Keep that LICENSE with any copy.
+Stock and article photos stay the publisher's or the clip license's. Do not redraw a real person's face from a news photo.

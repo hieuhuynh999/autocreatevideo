@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import importlib.util
 import json
 import math
@@ -23,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 import wave
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +51,7 @@ RED = (204, 32, 39)
 NAVY = (12, 26, 56)
 GOLD = (246, 192, 44)
 GREY = (200, 206, 216)
+CYAN = (120, 222, 255)
 INK = (10, 10, 14)
 
 FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
@@ -284,7 +287,7 @@ WEAK = {"the", "a", "an", "of", "to", "and", "in", "on", "for", "with", "at", "b
 
 def caption_chunks(parts: list[dict], spans: list[tuple[float, float]]) -> list[dict]:
     chunks: list[dict] = []
-    for part, (start, _end) in zip(parts, spans):
+    for index, (part, (start, _end)) in enumerate(zip(parts, spans)):
         current: list[tuple[float, float, str]] = []
         for word_start, word_end, token in part["words"]:
             word = (start + word_start, start + word_end, token)
@@ -296,11 +299,11 @@ def caption_chunks(parts: list[dict], spans: list[tuple[float, float]]) -> list[
                     carry = []
                     while not pause and len(current) > 1 and current[-1][2].lower() in WEAK:
                         carry.insert(0, current.pop())
-                    chunks.append({"words": current})
+                    chunks.append({"words": current, "part": index})
                     current = carry
             current.append(word)
         if current:
-            chunks.append({"words": current})
+            chunks.append({"words": current, "part": index})
     for index, chunk in enumerate(chunks):
         following = chunks[index + 1]["words"][0][0] if index + 1 < len(chunks) else chunk["words"][-1][1] + 0.4
         chunk["start"] = chunk["words"][0][0]
@@ -352,7 +355,7 @@ def draw_caption(draw, chunks: list[dict], second: float, layout: Layout) -> Non
         y = top + row * line_height
         tokens = line.split()
         for place, token in enumerate(tokens):
-            color = YELLOW if position == current else WHITE
+            color = YELLOW if position == current else (CYAN if re.search(r"\d", token) else WHITE)
             position += 1
             prefix = " ".join(tokens[:place]) + (" " if place else "")
             draw.text((x + face.getlength(prefix), y), token, font=face, fill=color, stroke_width=stroke, stroke_fill=INK)
@@ -460,6 +463,16 @@ class Photo:
         return canvas
 
 
+HOT_WORDS = (
+    "trump", "biden", "congress", "senate", "house", "supreme court", "election", "vote",
+    "war", "attack", "missile", "drone", "iran", "russia", "china", "israel", "ukraine",
+    "economy", "inflation", "jobs", "layoff", "strike", "storm", "hurricane", "earthquake",
+    "shooting", "killed", "dead", "crash", "outbreak", "fed ", "interest rate", "tariff",
+    "faa", "f.a.a", "airport", "flight", "ground stop", "airline", "delay", "cancel",
+    "evacuate", "bomb", "threat", "spacex", "rocket",
+)
+
+
 def _story_words(item: dict) -> tuple[str, str]:
     headline = item["title"].strip().rstrip(".") + "."
     spoken = item["spoken"]
@@ -468,27 +481,88 @@ def _story_words(item: dict) -> tuple[str, str]:
     spoken = re.sub(r"That is [^.]+\.", "", spoken)
     spoken = re.sub(r"[A-Z][A-Za-z ]+ is also reporting this\.", "", spoken)
     brief = " ".join(spoken.split())
-    if len(brief.split()) > 30:
-        brief = ""
+    if len(brief.split()) > 24:
+        brief = " ".join(brief.split()[:24]).rstrip(",;") + "."
     return headline, brief
+
+
+def _story_score(item: dict) -> float:
+    """Xếp bài nổi bật trong ngày: hai nguồn, chữ nóng, có số, tiêu đề rõ."""
+    title = item["title"].lower()
+    score = 0.0
+    if item.get("confirmed"):
+        score += 4
+    score += sum(2 for word in HOT_WORDS if word in title)
+    if re.search(r"\d", title):
+        score += 1.5
+    if any(word in title for word in ("why", "how", "what", "faces", "threat", "warn")):
+        score += 1
+    score += min(2.0, len(title.split()) / 8)
+    return score
+
+
+def _hook_line(stories: list[dict]) -> str:
+    lead = stories[0]
+    short = _ahead_words(lead["title"], 8)
+    if re.search(r"\d", lead["title"]):
+        return f"Start with this: {short}."
+    if lead.get("confirmed"):
+        return f"The story U.S. outlets are chasing: {short}."
+    return f"Today's top U.S. story: {short}."
+
+
+def _ahead_words(title: str, limit: int = 8) -> str:
+    text = title.rstrip(".").split(",")[0]
+    words = text.split()
+    weak = {"the", "a", "an", "of", "to", "in", "on", "for", "after", "and", "as", "with"}
+    if len(words) > limit:
+        words = words[:limit]
+    while len(words) > 3 and words[-1].lower().strip(".'") in weak:
+        words.pop()
+    return " ".join(words)
+
+
+def _why_line(story: dict) -> str:
+    title = story["title"].lower()
+    if any(word in title for word in ("election", "vote", "senate", "congress", "house")):
+        return "Why it matters: it can change who writes the next U.S. law."
+    if any(word in title for word in ("war", "attack", "missile", "drone", "iran", "russia", "china", "israel", "ukraine")):
+        return "Why it matters: it can move U.S. security and markets the same day."
+    if any(word in title for word in ("economy", "inflation", "jobs", "layoff", "fed", "rate", "tariff")):
+        return "Why it matters: it hits paychecks, prices, or both."
+    if any(word in title for word in ("storm", "hurricane", "earthquake", "outbreak", "crash", "shooting", "bomb", "evacuate")):
+        return "Why it matters: people and money are already on the line."
+    if any(word in title for word in ("faa", "f.a.a", "airport", "flight", "ground stop", "airline")):
+        return "Why it matters: delayed flights hit paychecks, trips, and whole cities at once."
+    if story.get("confirmed"):
+        return "Why it matters: more than one major newsroom is chasing it."
+    return "Why it matters: this is the story U.S. viewers are waking up to."
 
 
 def news_parts(when: datetime, folder: Path) -> tuple[list[dict], list[dict]]:
     run = _load("run")
     groups, _errors = run._load_news()
     _text, ready = run.news_script(when, groups, folder)
+    ranked = sorted(ready, key=_story_score, reverse=True)
     stories = []
-    for item in ready:
+    for item in ranked:
         headline, brief = _story_words(item)
-        stories.append({**item, "headline": headline, "brief": brief})
+        stories.append({**item, "headline": headline, "brief": brief, "score": _story_score(item)})
         if len(stories) == 3:
             break
     return stories, ready
 
 
 def _news_texts(stories: list[dict]) -> list[str]:
-    texts = [" ".join(part for part in (story["headline"], story["brief"], f"That is {story['outlet']}.") if part) for story in stories]
-    texts.append("That's today's U.S. briefing. Not advice about your vote or your money.")
+    """Hook → re-hook → 3 câu chuyện nổi bật → đóng vòng."""
+    hook = _hook_line(stories)
+    rehook = _why_line(stories[0])
+    texts = [hook, rehook]
+    for index, story in enumerate(stories):
+        label = "Lead story." if index == 0 else f"Next."
+        body = " ".join(part for part in (label, story["headline"], story["brief"], f"That is {story['outlet']}.") if part)
+        texts.append(body)
+    texts.append("That's today's U.S. briefing. Follow for tomorrow's top story. Not advice about your vote or your money.")
     return texts
 
 
@@ -504,11 +578,12 @@ def build_news(when: datetime, folder: Path) -> dict:
         seconds = sum(part["seconds"] for part in parts) + GAP * (len(parts) - 1) + TAIL
         if seconds <= MAX_SECONDS:
             break
+        # Giữ hook và re-hook. Rút brief trước, rồi bỏ bài kém nổi bật nhất.
         longest = max(stories, key=lambda story: len(story["brief"].split()))
         if longest["brief"]:
             longest["brief"] = ""
         elif len(stories) > 2:
-            stories.pop()
+            stories.pop()  # danh sách đã xếp theo điểm, phần tử cuối kém nhất
         else:
             raise RuntimeError(f"bản tin vẫn dài {seconds:.1f}s sau khi rút gọn")
     audio = work / "tin.wav"
@@ -520,7 +595,8 @@ def build_news(when: datetime, folder: Path) -> dict:
     day = f"{when.strftime('%b').upper()} {when.day}"
     total = len(stories)
     head = font("bold", 34)
-    credit = font("bold", 34)
+    hook_board = _ahead_words(stories[0]["title"], 7).upper()
+    why_board = _why_line(stories[0]).replace("Why it matters: ", "").upper()
 
     def frames():
         previous = None
@@ -530,13 +606,27 @@ def build_news(when: datetime, folder: Path) -> dict:
             scene = next(index for index, span in enumerate(spans) if second < span[1] or index == len(spans) - 1)
             start, end = spans[scene]
             share = (second - start) / max(0.01, end - start)
-            if scene < total:
-                photo = photos[scene]
-                canvas = photo.frame(share, bool(scene % 2))
+            story_index = scene - 2
+            if scene <= 1:
+                # Hook / re-hook: ảnh bài nổi bật + chữ lớn cho người xem tắt tiếng.
+                photo = photos[0]
+                canvas = photo.frame(share, False)
                 draw = ImageDraw.Draw(canvas, "RGBA")
                 pill(draw, f"U.S. NEWS · {day}", head, TOP_ZONE[0], 240, RED, WHITE, layout, "header")
-                pill(draw, f"{scene + 1}/{total}", head, 0, 240, (0, 0, 0, 170), WHITE, layout, "counter", right=TOP_ZONE[2])
-                face, lines = fit(f"PHOTO + STORY: {stories[scene]['outlet'].upper()}", "bold", 34, 26, LOW_ZONE[2] - LOW_ZONE[0], 1, layout=layout)
+                pill(draw, "TOP STORY", head, 0, 240, GOLD, NAVY, layout, "badge", right=TOP_ZONE[2])
+                board = hook_board if scene == 0 else why_board
+                face, lines = fit(board, "black", 92, 56, TOP_ZONE[2] - TOP_ZONE[0], 3, stroke=5, layout=layout)
+                block(draw, lines, face, TOP_ZONE[0], 360, layout, "hook-board", fill=YELLOW if scene == 0 else WHITE, stroke=5)
+                face, lines = fit(f"PHOTO + STORY: {stories[0]['outlet'].upper()}", "bold", 34, 26, LOW_ZONE[2] - LOW_ZONE[0], 1, layout=layout)
+                block(draw, lines, face, LOW_ZONE[0], 1138, layout, "credit", fill=GREY, stroke=3)
+            elif 0 <= story_index < total:
+                photo = photos[story_index]
+                canvas = photo.frame(share, bool(story_index % 2))
+                draw = ImageDraw.Draw(canvas, "RGBA")
+                pill(draw, f"U.S. NEWS · {day}", head, TOP_ZONE[0], 240, RED, WHITE, layout, "header")
+                label = "1 LEAD" if story_index == 0 else f"{story_index + 1}/{total}"
+                pill(draw, label, head, 0, 240, (0, 0, 0, 170), WHITE, layout, "counter", right=TOP_ZONE[2])
+                face, lines = fit(f"PHOTO + STORY: {stories[story_index]['outlet'].upper()}", "bold", 34, 26, LOW_ZONE[2] - LOW_ZONE[0], 1, layout=layout)
                 block(draw, lines, face, LOW_ZONE[0], 1138, layout, "credit", fill=GREY, stroke=3)
             else:
                 canvas = ImageEnhance.Brightness(photos[-1].backdrop).enhance(0.7)
@@ -550,7 +640,7 @@ def build_news(when: datetime, folder: Path) -> dict:
                         outlets.append(story["outlet"])
                 face, lines = fit("Sources: " + " · ".join(outlets), "bold", 40, 30, TOP_ZONE[2] - TOP_ZONE[0], 2, layout=layout)
                 y = block(draw, lines, face, TOP_ZONE[0], y + 30, layout, "end-sources", fill=GREY)
-                face, lines = fit("Follow for tomorrow's briefing", "black", 60, 44, LOW_ZONE[2] - LOW_ZONE[0], 2, layout=layout)
+                face, lines = fit("Follow for tomorrow's top story", "black", 60, 44, LOW_ZONE[2] - LOW_ZONE[0], 2, layout=layout)
                 block(draw, lines, face, LOW_ZONE[0], 900, layout, "end-follow", fill=YELLOW, stroke=4)
             draw_caption(draw, chunks, second, layout)
             progress(draw, second, seconds)
@@ -589,17 +679,24 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def money_texts(item: dict) -> list[str]:
+    """Proof-first hook → re-hook → số/lý do → chỗ ví dụ không áp dụng → việc tuần này → disclaimer."""
     lines = [line.strip() for line in item["spoken"].splitlines() if line.strip()]
     fact = lines[0].replace("Here is the number you control.", "").replace("Here is the number.", "").strip()
     fails = next((line for line in lines if re.search(r"\b(fails|breaks)\b", line)), "")
     week = next((line for line in lines if line.startswith("This week")), "")
-    texts = _split_sentences(fact)[:2]
+    number = item["number"]
+    facts = _split_sentences(fact)
+    hook = f"If you keep one money number this week, make it {number}."
+    rehook = facts[0] if facts else f"Here is what {number} actually means."
+    texts = [hook, rehook]
+    if len(facts) > 1:
+        texts.append(facts[1])
     generic = ("this video is", "the source for the rule", "this is not personal financial advice")
     extra = [
         line for line in lines[1:]
         if line not in (fails, week) and not line.lower().startswith(generic) and not line.startswith("This week")
     ]
-    if extra and sum(len(text.split()) for text in texts) < 40:
+    if extra and sum(len(text.split()) for text in texts) < 45:
         texts.append(_split_sentences(extra[0])[0])
     if fails:
         texts.append(_split_sentences(fails)[0])
@@ -869,9 +966,16 @@ def write_posts(folder: Path, when: datetime, news: dict | None, money: dict | N
     if news:
         lead = news["stories"][0]["headline"]
         title = job._title(lead, when, 70) + " #Shorts"
-        lines = [lead, "", "In this Short:"]
+        lines = [
+            lead,
+            "",
+            "Today's lead story first. Then two supporting U.S. stories.",
+            "",
+            "In this Short:",
+        ]
         for index, story in enumerate(news["stories"], start=1):
-            lines.append(f"{index}. {story['outlet']}: {story['title']}")
+            mark = "LEAD — " if index == 1 else ""
+            lines.append(f"{index}. {mark}{story['outlet']}: {story['title']}")
             lines.append(story["link"])
         lines += [
             "",
