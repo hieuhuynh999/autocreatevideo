@@ -41,26 +41,114 @@ def _schedule(page, stamp: str) -> None:
     if local < earliest:
         bump = earliest.replace(second=0, microsecond=0)
         local = bump + timedelta(minutes=(15 - bump.minute % 15) % 15)
-    radio = page.locator('tp-yt-paper-radio-button[name="SCHEDULE"]')
-    if radio.count() == 0:
-        radio = page.get_by_text(re.compile(r"^lên lịch$|^schedule$", re.I))
-    radio.first.click(timeout=10_000)
-    page.wait_for_timeout(500)
+    # Chờ bước Visibility. Short mới tải lên đôi khi còn đang kiểm tra.
+    page.get_by_text(re.compile(r"chế độ hiển thị|visibility|lưu hoặc xuất bản|save or publish", re.I)).first.wait_for(
+        state="visible", timeout=60_000
+    )
+    _open_schedule(page)
+    page.locator("#datepicker-trigger").first.wait_for(state="visible", timeout=30_000)
+    _pick_date(page, local)
+    _pick_time(page, local)
+    _dismiss_popups(page)
+    print(f"Đã đặt lịch {local.strftime('%d/%m/%Y %H:%M')} giờ Việt Nam.")
+
+
+def _open_schedule(page) -> None:
+    """Bật chế độ Lên lịch. Short có thể còn đang kiểm tra và radio nằm dưới vùng cuộn."""
+    try:
+        page.get_by_text(re.compile(r"đã kiểm tra xong|checks complete|no issues found", re.I)).first.wait_for(
+            state="visible", timeout=45_000
+        )
+    except Exception:
+        print("Chưa thấy dòng kiểm tra xong; vẫn thử lên lịch.")
+    # Cuộn trong hộp tải lên để thấy hàng Lên lịch.
+    for box in page.locator("#scrollable-content, ytcp-uploads-dialog #dialog-content, #left-button-section").all():
+        try:
+            box.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        except Exception:
+            pass
+    page.wait_for_timeout(400)
+    candidates = [
+        page.locator('tp-yt-paper-radio-button[name="SCHEDULE"]'),
+        page.locator("#second-container-radio-button"),
+        page.locator("#schedule-radio-button"),
+        page.locator("ytcp-visibility-selector tp-yt-paper-radio-button").nth(3),
+    ]
+    last_error: Exception | None = None
+    for candidate in candidates:
+        if candidate.count() == 0:
+            continue
+        target = candidate.first
+        try:
+            target.click(timeout=8_000, force=True)
+            page.wait_for_timeout(800)
+            if page.locator("#datepicker-trigger").count():
+                return
+        except Exception as exc:
+            last_error = exc
+            continue
+    # Không dùng get_by_text("Lên lịch"): dễ trùng nút Đăng ở góc dưới.
+    raise RuntimeError(f"Không bật được chế độ Lên lịch: {last_error}")
+
+
+def _dismiss_popups(page) -> None:
+    for _ in range(3):
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+    heading = page.locator("#visibility-title, ytcp-uploads-review h1, #second-container-radio-button").first
+    if heading.count():
+        try:
+            heading.click(timeout=3_000, force=True)
+        except Exception:
+            pass
+    page.wait_for_timeout(300)
+
+
+def _pick_date(page, local: datetime) -> None:
     trigger = page.locator("#datepicker-trigger").first
     trigger.click(timeout=10_000)
-    page.keyboard.press("Control+A")
-    page.keyboard.type(local.strftime("%d/%m/%Y"))
-    page.keyboard.press("Enter")
+    page.wait_for_timeout(400)
+    # Ưu tiên bấm đúng ô ngày trong lịch; gõ tay dễ để lịch mở đè nút.
+    label = re.compile(rf"{local.day}.*{local.strftime('%B')}|{local.strftime('%B')}.*{local.day}|^{local.day}$", re.I)
+    cell = page.get_by_role("gridcell", name=label)
+    if cell.count() == 0:
+        cell = page.locator(f"[aria-label*='{local.day}'][aria-label*='{local.strftime('%B')}'], .ytcp-date-picker-day, .calendar-day")
+    clicked = False
+    if cell.count():
+        try:
+            cell.first.click(timeout=5_000)
+            clicked = True
+        except Exception:
+            clicked = False
+    if not clicked:
+        page.keyboard.press("Control+A")
+        page.keyboard.type(local.strftime("%d/%m/%Y"))
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+    _dismiss_popups(page)
+
+
+def _pick_time(page, local: datetime) -> None:
     clock = page.locator("#time-of-day-container input").first
     clock.click(timeout=10_000)
     clock.fill(local.strftime("%H:%M"))
     clock.press("Enter")
     page.wait_for_timeout(300)
-    # Danh sách giờ còn mở sẽ che nút Lên lịch.
     if page.locator("tp-yt-paper-listbox:visible, #time-of-day-container tp-yt-iron-dropdown:visible").count():
-        clock.press("Tab")
-        page.wait_for_timeout(300)
-    print(f"Đã đặt lịch {local.strftime('%d/%m/%Y %H:%M')} giờ Việt Nam.")
+        stamp = local.strftime("%H:%M")
+        option = page.get_by_role("option", name=stamp)
+        if option.count():
+            try:
+                option.first.click(timeout=3_000)
+            except Exception:
+                clock.press("Tab")
+        else:
+            clock.press("Tab")
+    _dismiss_popups(page)
+
+
+def _daily_limit(page) -> bool:
+    return page.get_by_text(re.compile(r"giới hạn tải video lên hằng ngày|daily upload limit", re.I)).count() > 0
 
 
 def _one(page, item: dict) -> None:
@@ -74,6 +162,11 @@ def _one(page, item: dict) -> None:
     page.locator("input[type=file]").first.set_input_files(str(video))
     print(f"Đã chọn file {video.name}.")
     page.locator("#title-textarea #textbox").first.wait_for(state="visible", timeout=60_000)
+    if _daily_limit(page):
+        raise RuntimeError(
+            "YouTube chặn: đã đạt giới hạn tải video lên hằng ngày. "
+            "Cần bấm Xác minh số điện thoại trong Studio, hoặc đợi 24 giờ. Không thử lại để tránh đốt hạn mức."
+        )
     dang_nha._fill_box(page, "title-textarea", item["title"])
     dang_nha._fill_box(page, "description-textarea", item["description"])
     dang_nha._mark_not_for_kids(page)
@@ -82,6 +175,11 @@ def _one(page, item: dict) -> None:
         dang_nha._click_when_enabled(page, "#next-button")
         page.wait_for_timeout(800)
         print(f"Đã bấm Tiếp, bước {step + 1}.")
+        if _daily_limit(page):
+            raise RuntimeError(
+                "YouTube chặn: đã đạt giới hạn tải video lên hằng ngày. "
+                "Cần bấm Xác minh số điện thoại trong Studio, hoặc đợi 24 giờ. Không thử lại để tránh đốt hạn mức."
+            )
     _schedule(page, item["publish_at"])
     dang_nha._click_when_enabled(page, "#done-button")
     print("Đã bấm Đăng.")

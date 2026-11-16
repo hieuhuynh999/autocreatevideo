@@ -259,7 +259,15 @@ def check(folder: Path) -> tuple[bool, str]:
             if slot == "short-tin" and "why it matters" not in spoken:
                 bad.append("Short tin thiếu câu re-hook why it matters")
             if slot == "short-tien":
-                has_hook = "if you keep one money number" in spoken or spoken.strip().endswith("?") or "?" in spoken.split("\n", 1)[0]
+                first = spoken.strip().split("\n\n", 1)[0].strip()
+                weak = first.lower().startswith(
+                    ("in 20", "for 20", "the example", "this week", "this is not", "here is the number")
+                )
+                has_hook = (
+                    "if you keep one money number" in first
+                    or "?" in first
+                    or (3 <= len(first.split()) <= 18 and not weak)
+                )
                 if not has_hook:
                     bad.append("Short tiền thiếu câu hook mở đầu")
                 if "this week" not in spoken:

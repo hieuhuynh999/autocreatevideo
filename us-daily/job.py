@@ -195,28 +195,37 @@ def main() -> int:
     if {"short-tin.mp4", "short-tien.mp4"} <= posted_before:
         print(f"Ngày {day} đã đăng đủ 2 Short. Không dựng lại.")
         return 0
-    if not args.titles_only:
-        code = _run("lam_short.py", day)
-        with log.open("a", encoding="utf-8") as handle:
-            handle.write(f"{started} short={code} day={day}\n")
-    if not (folder / "lich.json").exists() or not json.loads((folder / "lich.json").read_text(encoding="utf-8")):
-        print(f"Chua co Short trong {folder}")
-        if args.dang:
-            _report(folder, when, False, "Không dựng được Short tin lẫn Short tiền, nên chưa mở Studio.")
-        return 1
-    if not args.dang:
-        print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
-        return 0
     spec = importlib.util.spec_from_file_location("kiem_dinh", ROOT / "us-daily" / "kiem_dinh.py")
     checker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checker)
-    try:
-        passed, verdict = checker.check(folder)
-    except Exception as exc:
-        passed, verdict = False, f"KIỂM ĐỊNH bị lỗi: {exc.__class__.__name__}. Không đăng để an toàn."
-    print(verdict)
+    passed = False
+    verdict = ""
+    code = 1
+    # Kiểm định không đạt thì dựng lại, tối đa 3 vòng, rồi mới từ bỏ.
+    for attempt in range(3):
+        if not args.titles_only or attempt > 0:
+            if attempt > 0:
+                print(f"Kiểm định chưa đạt (lần {attempt}). Dựng lại Short...")
+                time.sleep(20 * attempt)
+            code = _run("lam_short.py", day)
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(f"{started} short={code} try={attempt + 1} day={day}\n")
+        if not (folder / "lich.json").exists() or not json.loads((folder / "lich.json").read_text(encoding="utf-8")):
+            print(f"Chua co Short trong {folder}")
+            verdict = "Không dựng được Short tin lẫn Short tiền."
+            continue
+        if not args.dang:
+            print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
+            return 0
+        try:
+            passed, verdict = checker.check(folder)
+        except Exception as exc:
+            passed, verdict = False, f"KIỂM ĐỊNH bị lỗi: {exc.__class__.__name__}. Không đăng để an toàn."
+        print(verdict)
+        if passed:
+            break
     if not passed:
-        _report(folder, when, False, verdict + "\n\nChưa mở Studio. Không có video nào được đăng.")
+        _report(folder, when, False, verdict + "\n\nĐã dựng lại tối đa 3 lần vẫn không đạt. Chưa mở Studio.")
         return 1
     spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
     uploader = importlib.util.module_from_spec(spec)
@@ -229,7 +238,10 @@ def main() -> int:
             break
         except Exception as exc:
             failure = exc
-            print(f"Lượt đăng {attempt + 1} lỗi: {str(exc).splitlines()[0][:200] if str(exc) else exc.__class__.__name__}")
+            reason = str(exc).splitlines()[0][:200] if str(exc) else exc.__class__.__name__
+            print(f"Lượt đăng {attempt + 1} lỗi: {reason}")
+            if "giới hạn tải video lên hằng ngày" in str(exc).lower() or "daily upload limit" in str(exc).lower():
+                break
             time.sleep(120)
     if failure is not None:
         exc = failure

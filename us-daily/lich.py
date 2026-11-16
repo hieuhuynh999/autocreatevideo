@@ -48,7 +48,7 @@ HOOKS = [
     ("How much can you put in an IRA in 2026?", "THE 2026 IRA LIMIT"),
     ("How much more does a 401(k) allow than an IRA?", "401(k) VS IRA IN 2026"),
     ("At 50, your 401(k) limit gets bigger. By how much?", "THE AGE 50 CATCH-UP"),
-    ("Ages 60 to 63 get a bigger catch-up than age 50.", "THE AGE 60 TO 63 CATCH-UP"),
+    ("Ages 60 to 63 get a bigger catch-up than age 50. By how much?", "THE AGE 60 TO 63 CATCH-UP"),
     ("What is the most that can go into a 401(k), employer money included?", "THE 2026 TOTAL PLAN CAP"),
     ("Is your plan a SIMPLE IRA? The limit is lower.", "THE 2026 SIMPLE IRA LIMIT"),
     ("How much cash is 20 percent down on a 300,000 dollar home?", "20% DOWN ON A $300K HOME"),

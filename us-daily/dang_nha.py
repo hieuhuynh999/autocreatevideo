@@ -53,8 +53,15 @@ def _click_when_enabled(page, selector: str) -> None:
     for _ in range(60):
         disabled = button.get_attribute("aria-disabled")
         if disabled not in {"true", "True"}:
-            button.click(timeout=10_000)
-            return
+            try:
+                button.click(timeout=10_000)
+                return
+            except Exception:
+                # Popup lịch/giờ có thể còn mở đè nút.
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(400)
+                button.click(timeout=10_000, force=True)
+                return
         page.wait_for_timeout(1000)
     raise RuntimeError(f"Nút {selector} vẫn bị khóa.")
 
