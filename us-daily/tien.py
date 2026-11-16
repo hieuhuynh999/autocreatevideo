@@ -81,6 +81,59 @@ def _load(name: str):
     return module
 
 
+# Cảnh không vẽ số của bài khác. Bài lịch dùng những cảnh này, mỗi câu một cảnh.
+SAFE_SCENES = ("open", "pile", "statement", "city", "boxes", "folder", "onehouse", "week")
+
+
+def _word_at(words, needle: str) -> int | None:
+    tokens = [token.lower().strip(".,!?;:\"'") for _start, _end, token in words]
+    parts = needle.split()
+    for index in range(len(tokens) - len(parts) + 1):
+        if tokens[index:index + len(parts)] == parts:
+            return index
+    return None
+
+
+def _sentence_scenes(words):
+    """Mỗi mốc trong lời nói là một cảnh. Giọng đọc không gắn dấu câu vào từ."""
+    anchors = (
+        ("open", "here is the number"),
+        ("statement", "this video is one example"),
+        ("folder", "the source for the rule"),
+        ("onehouse", "the example fails"),
+        ("week", "this week"),
+        ("advice", "not personal financial advice"),
+    )
+    points = []
+    for name, phrase in anchors:
+        index = _word_at(words, phrase)
+        if index is None:
+            continue
+        start, _end, token = words[index]
+        points.append((start, name, token, index))
+    statement = next((item for item in points if item[1] == "statement"), None)
+    source = next((item for item in points if item[1] == "folder"), None)
+    if statement and source:
+        pauses = []
+        last = statement[0]
+        for index in range(statement[3] + 4, source[3]):
+            gap = words[index][0] - words[index - 1][1]
+            if gap < 0.35 or not words[index][2][:1].isupper():
+                continue
+            if words[index][0] - last < 6:
+                continue
+            pauses.append(index)
+            last = words[index][0]
+        for name, index in zip(("pile", "city"), pauses[:2]):
+            start, _end, token = words[index]
+            points.append((start, name, token, index))
+    points.sort(key=lambda item: item[3])
+    found = [(start, name, token) for start, name, token, _index in points]
+    if not found and words:
+        found.append((words[0][0], "open", words[0][2]))
+    return found
+
+
 def _marks(words):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
@@ -90,11 +143,7 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        return _sentence_scenes(words)
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -593,10 +642,11 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
     else:
-        draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
-        _text(draw, (470, 210), "an example", fonts["mid"], INK)
-        _text(draw, (470, 270), "not a promise", fonts["small"], (120, 50, 40))
-        draw.line((470, 320, 470 + int(420 * unit), 320), fill=(120, 50, 40), width=6)
+        draw.rounded_rectangle((420, 140, 980, 430), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (470, 165), number, fonts["mid"], (186, 48, 36))
+        _text(draw, (470, 240), "an example", fonts["mid"], INK)
+        _text(draw, (470, 310), "not a promise", fonts["small"], (120, 50, 40))
+        draw.line((470, 370, 470 + int(420 * unit), 370), fill=(120, 50, 40), width=6)
     tip_x, tip_y = _pen_tip(name, unit, second)
     _host(draw, tip_x, tip_y, second)
 
