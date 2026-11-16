@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -939,6 +940,22 @@ def main() -> int:
             sources.append(f"Related, not read in full: {other['outlet']}: {other['title']}")
             sources.append(other["link"])
     video_note = "Chưa ghép video tin."
+    (folder / "stories.json").write_text(
+        json.dumps(
+            [
+                {
+                    "outlet": item["outlet"],
+                    "title": item["title"],
+                    "link": item["link"],
+                    "confirmed": item["confirmed"],
+                }
+                for item in used
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     if used:
         try:
             video = _build_news_video(folder, when, used)
