@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -959,6 +960,29 @@ def main() -> int:
     for name, text in files.items():
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
+    (folder / "tin.json").write_text(
+        json.dumps(
+            [
+                {"outlet": item["outlet"], "title": item["title"], "link": item["link"]}
+                for item in used
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (folder / "tien.json").write_text(
+        json.dumps(
+            {
+                "title": finance[0]["title"],
+                "number": finance[0]["number"],
+                "source": finance[0]["source"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(files["review.md"])
     return 0 if "tin và một bài tiền đủ để thu" in files["review.md"] else 1
 

@@ -15,14 +15,16 @@ Do not publish, upload, or schedule anything on YouTube, TikTok, or email unless
 
 ## Daily pack (current)
 
-Since 2026-11-13 the scheduled pack is **Shorts only**:
+Since 2026-11-14 the scheduled pack is **four videos**. `python -u us-daily/job.py --now --dang` builds them and schedules with `len_lich.py`. It does not open Chrome and does not type a Google password.
 
 | Slot (Eastern) | File | Job |
 |---|---|---|
-| 8:00 | `short-tin.mp4` | Top U.S. stories of the day, ranked and hooked |
-| 16:00 | `short-tien.mp4` | One money/housing number from the 30-day calendar |
+| 8:00 | `vi-du-tin.mp4` | 1280×720 U.S. briefing. Article photos from PBS NewsHour, New York Times, and NPR. |
+| 12:00 | `short-tin.mp4` | 1080×1920 Short cut from about the first 35 seconds of the briefing. |
+| 16:00 | `tai-chinh-1.mp4` | 1280×720 money, housing, or economy piece for that date in `us-daily/lich.py`. |
+| 20:00 | `short-tien.mp4` | 1080×1920 Short cut from about the first 35 seconds of the money video. |
 
-Built by `us-daily/lam_short.py`. Verified by `us-daily/kiem_dinh.py` (1080×1920, 15–59s, ≥29 fps, loudness, safe-zone text). Do **not** cut Shorts out of a 1280×720 long video.
+Order on channel `UCE056WfiFMV6k4N5irnIDnA`: briefing, news Short, money video, money Short. `selfDeclaredMadeForKids` is false. If `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, or `YOUTUBE_REFRESH_TOKEN` is missing, copy the four files and `youtube-YYYY-MM-DD.txt` into artifacts and stop. Do not print tokens. Do not commit videos or `.env`.
 
 Retention, hooks, and rival-beat rules live in [retention.md](retention.md). The latest high-view rival snapshot is [rival-compare.md](rival-compare.md). Read both before changing scripts or layout.
 

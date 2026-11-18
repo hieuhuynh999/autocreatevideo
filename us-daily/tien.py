@@ -12,6 +12,7 @@ import asyncio
 import importlib.util
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -81,7 +82,51 @@ def _load(name: str):
     return module
 
 
-def _marks(words):
+def _norm(token: str) -> str:
+    return re.sub(r"^[^a-z0-9$]+|[^a-z0-9$]+$", "", token.lower())
+
+
+def _script_marks(words, spoken: str):
+    """Một cảnh cho mỗi dòng lời thoại của bài trong lịch."""
+    parts = [re.sub(r"\s+", " ", part).strip() for part in spoken.splitlines() if part.strip()]
+    tokens = [_norm(token) for _start, _end, token in words]
+    found = []
+    cursor = 0
+    for index, part in enumerate(parts):
+        keys = [_norm(word) for word in part.split() if _norm(word)]
+        at = None
+        width_used = 1
+        for width in (4, 3, 2, 1):
+            need = keys[:width]
+            if len(need) < width:
+                continue
+            for start_at in range(cursor, len(tokens) - width + 1):
+                if tokens[start_at : start_at + width] == need:
+                    at = start_at
+                    width_used = width
+                    break
+            if at is not None:
+                break
+        if at is None:
+            continue
+        cursor = at + width_used
+        start, _end, token = words[at]
+        low = part.lower()
+        if index == 0:
+            name = "open"
+        elif low.startswith("this week"):
+            name = "week"
+        elif "not personal financial advice" in low:
+            name = "advice"
+        else:
+            name = f"line{index}"
+        found.append((start, name, token))
+    if not found and words:
+        found.append((words[0][0], "open", words[0][2]))
+    return found
+
+
+def _marks(words, spoken: str = ""):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
     sample = full.lower()
@@ -89,6 +134,8 @@ def _marks(words):
         board = CARD_BOARD
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
+    elif spoken.strip():
+        return _script_marks(words, spoken)
     else:
         board = (
             ("open", ("here is the number",)),
@@ -588,17 +635,37 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
             fill = GOLD if day == int(unit * 6) else (255, 255, 255)
             draw.rounded_rectangle((x, 160, x + 90, 280), radius=8, fill=fill, outline=INK, width=3)
         draw.ellipse((360 + int(unit * 6) * 110 - 8, 150, 470 + int(unit * 6) * 110, 300), outline=(186, 48, 36), width=5)
+        _text(draw, (480, 360), number, _number_font(fonts, number), (186, 48, 36))
     elif name == "autopay":
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
     else:
-        draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
-        _text(draw, (470, 210), "an example", fonts["mid"], INK)
-        _text(draw, (470, 270), "not a promise", fonts["small"], (120, 50, 40))
-        draw.line((470, 320, 470 + int(420 * unit), 320), fill=(120, 50, 40), width=6)
+        _text(draw, (400, 120), number, _number_font(fonts, number), (186, 48, 36))
+        kind = index % 4
+        if kind == 0:
+            for item in range(5):
+                bob = int(24 * math.sin(second * 3 + item))
+                _coin(draw, 380 + item * 90, 340 + bob, 20)
+        elif kind == 1:
+            _column(draw, 420, 500, 80 + 180 * unit, 140, (36, 92, 176), number, fonts["small"])
+            _column(draw, 680, 500, 60 + 80 * unit, 140, GOLD, "", fonts["small"])
+        elif kind == 2:
+            draw.rounded_rectangle((380, 300, 980, 500), radius=12, fill=(255, 252, 242), outline=INK, width=5)
+            for row in range(4):
+                draw.rectangle((420, 330 + row * 36, 900, 348 + row * 36), fill=(220, 214, 200))
+        else:
+            for day in range(7):
+                x = 340 + day * 110
+                fill = GOLD if day == int(unit * 6) else (255, 255, 255)
+                draw.rounded_rectangle((x, 340, x + 90, 470), radius=8, fill=fill, outline=INK, width=3)
     tip_x, tip_y = _pen_tip(name, unit, second)
     _host(draw, tip_x, tip_y, second)
+
+
+def _number_font(fonts, number: str):
+    size = 84 if len(number) <= 7 else 56 if len(number) <= 12 else 40
+    return fonts["grow"](size)
 
 
 def _fonts(draw_mod) -> dict:
@@ -630,8 +697,8 @@ def _frame(words, marks, fonts, number: str, second: float):
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, spoken: str = "") -> None:
+    marks = _marks(words, spoken)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -687,7 +754,7 @@ def main() -> int:
     audio = folder / "tai-chinh-1.mp3"
     words = asyncio.run(run._speak_timed(item["spoken"], audio))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], item["spoken"])
     print(dest)
     return 0
 

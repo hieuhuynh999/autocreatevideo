@@ -58,20 +58,20 @@ def _refresh() -> str:
     return payload.get("access_token", "")
 
 
-def _soon_enough(stamp: str) -> str:
+def _publish_at(stamp: str, not_before: datetime) -> tuple[str, datetime]:
     when = datetime.fromisoformat(stamp)
     if when.tzinfo is None:
         when = when.replace(tzinfo=NY)
-    earliest = datetime.now(when.tzinfo) + timedelta(minutes=20)
-    if when < earliest:
-        when = earliest
-    return when.astimezone(NY).isoformat()
+    when = when.astimezone(NY)
+    if when < not_before:
+        when = not_before
+    return when.isoformat(), when + timedelta(minutes=25)
 
 
 def _upload(token: str, item: dict) -> str:
     video = Path(item["file"])
     size = video.stat().st_size
-    publish_at = _soon_enough(item["publish_at"])
+    publish_at = item["publish_at"]
     meta = {
         "snippet": {
             "title": item["title"][:100],
@@ -131,11 +131,15 @@ def schedule(folder: Path) -> int:
             "YOUTUBE_CLIENT_SECRET và YOUTUBE_REFRESH_TOKEN. Không gõ mật khẩu."
         )
         return 0
+    not_before = datetime.now(NY) + timedelta(minutes=20)
     for item in items:
         path = Path(item["file"])
         if not path.exists():
             print(f"Thiếu file, bỏ qua: {path.name}")
             continue
+        publish_at, not_before = _publish_at(item["publish_at"], not_before)
+        item = dict(item)
+        item["publish_at"] = publish_at
         try:
             link = _upload(token, item)
         except urllib.error.HTTPError:
