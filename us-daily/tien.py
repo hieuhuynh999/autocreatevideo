@@ -71,6 +71,17 @@ FUND_BOARD = (
     ("autopay", ("day after payday", "set the transfer")),
     ("advice", ("not personal", "not a projection")),
 )
+HOUSE_BOARD = (
+    ("open", ("here is the number",)),
+    ("example", ("one example for a household",)),
+    ("down", ("is the down payment",)),
+    ("insure", ("mortgage insurance",)),
+    ("closing", ("closing costs",)),
+    ("source", ("the source for the rule",)),
+    ("fails", ("the example fails",)),
+    ("week", ("this week",)),
+    ("advice", ("not personal financial advice",)),
+)
 
 
 def _load(name: str):
@@ -89,6 +100,8 @@ def _marks(words):
         board = CARD_BOARD
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
+    elif any(phrase in sample for phrase in ("down payment", "mortgage insurance", "home price", "closing costs")):
+        board = HOUSE_BOARD
     else:
         board = (
             ("open", ("here is the number",)),
@@ -145,13 +158,16 @@ def _live_line(words, second: float) -> str:
             break
     window = words[max(0, index - 6) : index + 5]
     bits: list[str] = []
-    for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+    previous_end = None
+    for start, end, token in window:
+        pause = previous_end is not None and start - previous_end > 0.45
+        if bits and pause and token[:1].isupper():
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        previous_end = end
     return "".join(bits)
 
 
@@ -592,6 +608,43 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
+    elif name == "example":
+        draw.rounded_rectangle((400, 170, 980, 430), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (450, 210), "one household", fonts["mid"], INK)
+        _text(draw, (450, 280), "not your bill", fonts["small"], (120, 50, 40))
+        draw.line((450, 360, 450 + int(440 * unit), 360), fill=(120, 50, 40), width=6)
+    elif name == "down":
+        draw.polygon([(340, 300), (620, 140), (900, 300)], fill=(196, 72, 64), outline=INK)
+        draw.rectangle((400, 300, 840, 500), fill=(255, 244, 220), outline=INK, width=4)
+        draw.rectangle((580, 380, 680, 500), fill=(120, 78, 48), outline=INK, width=3)
+        _text(draw, (470, 320), "$300,000", fonts["small"], INK)
+        _text(draw, (940, 150), "20% down", fonts["small"], (186, 48, 36))
+        for item in range(int(1 + 5 * unit)):
+            _coin(draw, 980, 460 - item * 28, 16)
+    elif name == "insure":
+        draw.polygon([(640, 130), (920, 220), (860, 430), (640, 510), (420, 430), (360, 220)], fill=(36, 92, 176), outline=INK)
+        _text(draw, (500, 250), "under 20%", fonts["mid"], (255, 255, 255))
+        _text(draw, (500, 320), "insurance", fonts["small"], (255, 255, 255))
+    elif name == "closing":
+        draw.rounded_rectangle((280, 180, 620, 460), radius=12, fill=(255, 252, 242), outline=INK, width=4)
+        _text(draw, (320, 220), "down payment", fonts["small"], INK)
+        _text(draw, (320, 280), number, fonts["mid"], (186, 48, 36))
+        draw.rounded_rectangle((700, 160 + int(40 * (1 - unit)), 1120, 420), radius=12, fill=(255, 232, 190), outline=INK, width=4)
+        _text(draw, (750, 230), "closing", fonts["mid"], INK)
+        _text(draw, (750, 300), "extra cash", fonts["small"], (120, 50, 40))
+    elif name == "source":
+        draw.rounded_rectangle((400, 110, 980, 500), radius=12, fill=(255, 252, 242), outline=INK, width=5)
+        _text(draw, (450, 150), "CFPB", fonts["mid"], NAVY)
+        for row in range(6):
+            span = int(420 * min(1, unit + row * 0.04))
+            draw.rectangle((450, 240 + row * 38, 450 + span, 258 + row * 38), fill=(180, 190, 210))
+    elif name == "fails":
+        draw.polygon([(260, 250), (430, 140), (600, 250)], fill=(196, 72, 64), outline=INK)
+        draw.rectangle((300, 250, 560, 470), fill=(255, 244, 220), outline=INK, width=4)
+        _text(draw, (330, 300), "$300,000", fonts["small"], INK)
+        draw.polygon([(740, 280), (900, 180), (1060, 280)], fill=(150, 150, 158), outline=INK)
+        draw.rectangle((780, 280, 1020, 470), fill=(236, 236, 240), outline=INK, width=4)
+        _text(draw, (820, 330), "other price", fonts["small"], INK)
     else:
         draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
         _text(draw, (470, 210), "an example", fonts["mid"], INK)
@@ -627,7 +680,19 @@ def _frame(words, marks, fonts, number: str, second: float):
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
     _caption(draw, fonts["caption"], _live_line(words, second))
+    _stamp_number(draw, fonts, number)
     return image
+
+
+def _stamp_number(draw, fonts, number: str) -> None:
+    if not number:
+        return
+    font = fonts["mid"]
+    width = int(font.getlength(number)) + 36
+    x1, y0, y1 = 1160, 52, 116
+    x0 = max(200, x1 - width)
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=14, fill=(186, 48, 36))
+    _text(draw, (x0 + 18, y0 + 16), number, font, (255, 255, 255))
 
 
 def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:

@@ -1,8 +1,10 @@
-"""Dựng hai Short dọc (tin Mỹ và tiền bạc), kiểm định, rồi hẹn giờ công khai.
+"""Dựng bốn video trong ngày rồi hẹn giờ công khai.
 
-Máy nhà chạy lúc 18:00 giờ Việt Nam, tức 6:00 sáng New York vào mùa đông.
-Hai Short được hẹn: 8:00 và 16:00 giờ miền Đông.
-Cờ --dang mới gọi YouTube. Không có cờ thì chỉ dựng file.
+Bản tin ngang 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00
+giờ America/New_York. Cờ --dang gọi len_lich.py bằng token.
+Không mở Chrome. Không gõ mật khẩu. Không in token.
+Thiếu YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET hoặc YOUTUBE_REFRESH_TOKEN
+thì chép bốn file và phần chữ vào artifacts rồi dừng.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ def _tags(text: str, kind: str) -> str:
     words = text.lower()
     if kind == "finance":
         picked = ["#PersonalFinance", "#MoneyTips"]
-        if any(item in words for item in ("card", "debt", "apr", "percent")):
+        if any(item in words for item in ("card", "debt", "apr", "credit")):
             picked.append("#CreditCard")
         if "grocery" in words:
             picked.append("#Groceries")
@@ -73,6 +75,8 @@ def _tags(text: str, kind: str) -> str:
             picked.append("#Savings")
         if any(item in words for item in ("fund", "invest")):
             picked.append("#Investing")
+        if any(item in words for item in ("home", "mortgage", "down payment", "closing", "housing")):
+            picked.append("#Housing")
         picked.append("#USFinance")
     else:
         picked = ["#USNews", "#NewsBriefing"]
@@ -173,6 +177,240 @@ def _run(script: str, day: str) -> int:
     return proc.returncode
 
 
+def _probe(path: Path) -> dict:
+    import imageio_ffmpeg
+
+    proc = subprocess.run(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(path)],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    text = proc.stderr
+    info: dict = {"duration": None, "size": None, "audio": "Audio:" in text, "fps": None}
+    match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if match:
+        hours, minutes, seconds = match.groups()
+        info["duration"] = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    size = re.search(r"Video:.*?(\d{3,5})x(\d{3,5})", text)
+    if size:
+        info["size"] = (int(size.group(1)), int(size.group(2)))
+    fps = re.search(r"(\d+(?:\.\d+)?) fps", text)
+    if fps:
+        info["fps"] = float(fps.group(1))
+    return info
+
+
+def _calendar(when: datetime):
+    spec = importlib.util.spec_from_file_location("lich", ROOT / "us-daily" / "lich.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.row_for(when), module.public_times(when)
+
+
+def _stories(folder: Path) -> list[dict]:
+    path = folder / "tin.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _finance_title(folder: Path, row: dict) -> str:
+    if row.get("title"):
+        return row["title"]
+    script = folder / "finance-1.txt"
+    if script.exists():
+        text = script.read_text(encoding="utf-8")
+        if "TITLE\n" in text:
+            return text.split("TITLE\n", 1)[1].split("\n", 1)[0].strip()
+    return row.get("hook") or "A household money number"
+
+
+def _cut_shorts(folder: Path) -> None:
+    spec = importlib.util.spec_from_file_location("cat_short", ROOT / "us-daily" / "cat_short.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.cut(folder / "vi-du-tin.mp4", folder / "short-tin.mp4", 35)
+    module.cut(folder / "tai-chinh-1.mp4", folder / "short-tien.mp4", 35)
+
+
+def _news_copy(stories: list[dict], when: datetime, short: bool) -> tuple[str, str]:
+    lead = stories[0]["title"].rstrip(".") if stories else "U.S. briefing"
+    title = _title(lead, when, 92 if short else 100)
+    if short:
+        title += " #Shorts"
+    lines = [lead, ""]
+    if short:
+        lines += ["The opening of today's U.S. briefing.", ""]
+    lines += ["Stories with pictures from PBS NewsHour, the New York Times, and NPR.", ""]
+    for index, story in enumerate(stories, start=1):
+        lines.append(f"{index}. {story['outlet']}: {story['title']}")
+        lines.append(story["link"])
+    lines += [
+        "",
+        "Pictures and headlines belong to the newsrooms named on screen.",
+        "This is not advice about your vote or your money.",
+        "This video is not made for kids.",
+        "",
+        _tags(" ".join(story["title"] for story in stories), "news") + (" #Shorts" if short else ""),
+    ]
+    return title, "\n".join(lines)
+
+
+def _money_copy(folder: Path, row: dict, when: datetime, short: bool) -> tuple[str, str]:
+    headline = _finance_title(folder, row)
+    title = _title(headline, when, 92 if short else 100)
+    if short:
+        title += " #Shorts"
+    lines = [
+        row.get("hook") or headline,
+        "",
+        f"Number on screen: {row.get('number', '')}".rstrip(),
+        f"Source: {row.get('source', '')}".rstrip(),
+        "",
+        "This is not personal financial advice.",
+        "This video is not made for kids.",
+        "",
+        _tags(f"{headline} {row.get('source', '')}", "finance") + (" #Shorts" if short else ""),
+    ]
+    return title, "\n".join(lines)
+
+
+def _write_schedule(folder: Path, when: datetime, stories: list[dict], row: dict, times: dict) -> None:
+    news_title, news_desc = _news_copy(stories, when, False)
+    short_news_title, short_news_desc = _news_copy(stories, when, True)
+    money_title, money_desc = _money_copy(folder, row, when, False)
+    short_money_title, short_money_desc = _money_copy(folder, row, when, True)
+    items = [
+        {
+            "file": str((folder / "vi-du-tin.mp4").resolve()),
+            "title": news_title,
+            "description": news_desc,
+            "publish_at": times["tin"].isoformat(),
+            "category": "25",
+            "madeForKids": False,
+        },
+        {
+            "file": str((folder / "short-tin.mp4").resolve()),
+            "title": short_news_title,
+            "description": short_news_desc,
+            "publish_at": times["short-tin"].isoformat(),
+            "category": "25",
+            "madeForKids": False,
+        },
+        {
+            "file": str((folder / "tai-chinh-1.mp4").resolve()),
+            "title": money_title,
+            "description": money_desc,
+            "publish_at": times["tien"].isoformat(),
+            "category": "27",
+            "madeForKids": False,
+        },
+        {
+            "file": str((folder / "short-tien.mp4").resolve()),
+            "title": short_money_title,
+            "description": short_money_desc,
+            "publish_at": times["short-tien"].isoformat(),
+            "category": "27",
+            "madeForKids": False,
+        },
+    ]
+    (folder / "lich.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    blocks = [
+        f"Ngày New York: {when.strftime('%Y-%m-%d')}",
+        "Kênh: UCE056WfiFMV6k4N5irnIDnA",
+        "Không dành cho trẻ em (selfDeclaredMadeForKids: false).",
+        "Thứ tự: bản tin 8:00, Short tin 12:00, bài tiền 16:00, Short tiền 20:00 giờ America/New_York.",
+        "",
+    ]
+    labels = ("BẢN TIN", "SHORT TIN", "BÀI TIỀN", "SHORT TIỀN")
+    for label, item in zip(labels, items):
+        blocks += [
+            f"===== {label} =====",
+            f"File: {Path(item['file']).name}",
+            f"Giờ công khai: {item['publish_at']}",
+            "madeForKids: false",
+            item["title"],
+            "",
+            item["description"],
+            "",
+        ]
+    (folder / "youtube.txt").write_text("\n".join(blocks), encoding="utf-8")
+
+
+def _acceptable(folder: Path) -> tuple[bool, str]:
+    expect = {
+        "vi-du-tin.mp4": {"shape": (1280, 720), "min": 45, "max": 700, "fps": 20},
+        "tai-chinh-1.mp4": {"shape": (1280, 720), "min": 30, "max": 700, "fps": 20},
+        "short-tin.mp4": {"shape": (1080, 1920), "min": 30, "max": 40, "fps": 29},
+        "short-tien.mp4": {"shape": (1080, 1920), "min": 30, "max": 40, "fps": 29},
+    }
+    lines: list[str] = []
+    ok = True
+    for name, rule in expect.items():
+        path = folder / name
+        if not path.exists():
+            ok = False
+            lines.append(f"{name}: thiếu file")
+            continue
+        info = _probe(path)
+        problems = []
+        if info["size"] != rule["shape"]:
+            problems.append(f"khung {info['size']}")
+        length = info["duration"] or 0
+        if not (rule["min"] <= length <= rule["max"]):
+            problems.append(f"dài {length:.1f}s")
+        if not info["fps"] or info["fps"] < rule["fps"]:
+            problems.append(f"{info['fps']} fps")
+        if not info["audio"]:
+            problems.append("không có tiếng")
+        if problems:
+            ok = False
+            lines.append(f"{name}: " + "; ".join(problems))
+        else:
+            lines.append(f"{name}: {info['size'][0]}x{info['size'][1]}, {length:.1f}s, {info['fps']:.0f} fps")
+    stories = _stories(folder)
+    outlets = {item.get("outlet") for item in stories}
+    allowed = {"PBS NewsHour", "New York Times", "NPR"}
+    if len(stories) < 4:
+        ok = False
+        lines.append(f"bản tin chỉ có {len(stories)} bài có ảnh")
+    elif not outlets <= allowed:
+        ok = False
+        lines.append("bản tin có nguồn ngoài PBS NewsHour, New York Times và NPR")
+    else:
+        lines.append("bài có ảnh: " + "; ".join(f"{item['outlet']}: {item['title']}" for item in stories))
+    missing = [name for name in ("PBS NewsHour", "New York Times", "NPR") if name not in outlets]
+    if missing:
+        lines.append("nguồn không có bài có ảnh: " + ", ".join(missing))
+    return ok, "\n".join(lines)
+
+
+def _artifacts(folder: Path, day: str) -> None:
+    dest_root = Path("/opt/cursor/artifacts")
+    dest_root.mkdir(parents=True, exist_ok=True)
+    names = {
+        "vi-du-tin.mp4": f"tin-{day}.mp4",
+        "short-tin.mp4": f"short-tin-{day}.mp4",
+        "tai-chinh-1.mp4": f"tien-{day}.mp4",
+        "short-tien.mp4": f"short-tien-{day}.mp4",
+    }
+    for src, dest in names.items():
+        shutil.copy2(folder / src, dest_root / dest)
+        print(f"Artifact: {dest_root / dest}")
+    target = dest_root / f"youtube-{day}.txt"
+    shutil.copy2(folder / "youtube.txt", target)
+    print(f"Artifact: {target}")
+
+
+def _tokens_missing() -> list[str]:
+    return [
+        name
+        for name in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")
+        if not _secret(name)
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--titles-only", action="store_true")
@@ -190,71 +428,53 @@ def main() -> int:
     folder.mkdir(parents=True, exist_ok=True)
     log = OUT / "lich.log"
     started = datetime.now(VN).strftime("%Y-%m-%d %H:%M")
-    done = folder / "da-dang.txt"
-    posted_before = set(done.read_text(encoding="utf-8").splitlines()) if done.exists() else set()
-    if {"short-tin.mp4", "short-tien.mp4"} <= posted_before:
-        print(f"Ngày {day} đã đăng đủ 2 Short. Không dựng lại.")
-        return 0
-    spec = importlib.util.spec_from_file_location("kiem_dinh", ROOT / "us-daily" / "kiem_dinh.py")
-    checker = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(checker)
+    row, times = _calendar(when)
+    print(f"Ngày New York: {day} {when.strftime('%H:%M %Z')}")
+    print(f"Bài tiền: {row.get('number', '')} { _finance_title(folder, row) }".strip())
+    for name, stamp in times.items():
+        print(f"Giờ {name}: {stamp.strftime('%Y-%m-%d %H:%M %Z')}")
     passed = False
     verdict = ""
-    code = 1
-    # Kiểm định không đạt thì dựng lại, tối đa 3 vòng, rồi mới từ bỏ.
     for attempt in range(3):
-        if not args.titles_only or attempt > 0:
-            if attempt > 0:
-                print(f"Kiểm định chưa đạt (lần {attempt}). Dựng lại Short...")
-                time.sleep(20 * attempt)
-            code = _run("lam_short.py", day)
-            with log.open("a", encoding="utf-8") as handle:
-                handle.write(f"{started} short={code} try={attempt + 1} day={day}\n")
-        if not (folder / "lich.json").exists() or not json.loads((folder / "lich.json").read_text(encoding="utf-8")):
-            print(f"Chua co Short trong {folder}")
-            verdict = "Không dựng được Short tin lẫn Short tiền."
-            continue
-        if not args.dang:
-            print("Chưa mở YouTube Studio. Thêm --dang để đăng bằng Chrome trên máy này.")
-            return 0
-        try:
-            passed, verdict = checker.check(folder)
-        except Exception as exc:
-            passed, verdict = False, f"KIỂM ĐỊNH bị lỗi: {exc.__class__.__name__}. Không đăng để an toàn."
+        if attempt:
+            print(f"Chưa đạt (lần {attempt}). Dựng lại...")
+            time.sleep(15 * attempt)
+        news_code = _run("run.py", day)
+        money_code = _run("tien.py", day)
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(f"{started} news={news_code} money={money_code} try={attempt + 1} day={day}\n")
+        if (folder / "vi-du-tin.mp4").exists() and (folder / "tai-chinh-1.mp4").exists():
+            try:
+                _cut_shorts(folder)
+            except Exception as exc:
+                print(f"Không cắt được Short: {exc.__class__.__name__}")
+        stories = _stories(folder)
+        if stories and all((folder / name).exists() for name in ("vi-du-tin.mp4", "short-tin.mp4", "tai-chinh-1.mp4", "short-tien.mp4")):
+            _write_schedule(folder, when, stories, row, times)
+        passed, verdict = _acceptable(folder)
         print(verdict)
         if passed:
             break
     if not passed:
-        _report(folder, when, False, verdict + "\n\nĐã dựng lại tối đa 3 lần vẫn không đạt. Chưa mở Studio.")
+        print("Không đủ bốn video. Không hẹn giờ, không mở Chrome.")
         return 1
-    spec = importlib.util.spec_from_file_location("dang_studio", ROOT / "us-daily" / "dang_studio.py")
+    if not args.dang:
+        print("Chưa hẹn giờ. Thêm --dang để hẹn bằng token YouTube.")
+        return 0
+    missing = _tokens_missing()
+    if missing:
+        _artifacts(folder, day)
+        print(
+            "Thiếu token YouTube: "
+            + ", ".join(missing)
+            + ". Đã để bốn video và phần chữ trong /opt/cursor/artifacts. "
+            "Không gõ mật khẩu. Không hẹn giờ kênh UCE056WfiFMV6k4N5irnIDnA."
+        )
+        return 0
+    spec = importlib.util.spec_from_file_location("len_lich", ROOT / "us-daily" / "len_lich.py")
     uploader = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(uploader)
-    failure = None
-    for attempt in range(3):
-        try:
-            code = uploader.upload_day(folder)
-            failure = None
-            break
-        except Exception as exc:
-            failure = exc
-            reason = str(exc).splitlines()[0][:200] if str(exc) else exc.__class__.__name__
-            print(f"Lượt đăng {attempt + 1} lỗi: {reason}")
-            if "giới hạn tải video lên hằng ngày" in str(exc).lower() or "daily upload limit" in str(exc).lower():
-                break
-            time.sleep(120)
-    if failure is not None:
-        exc = failure
-        reason = str(exc).splitlines()[0][:300] if str(exc) else exc.__class__.__name__
-        _report(folder, when, False, f"Lỗi khi bấm trong Studio: {reason}\nẢnh màn hình lúc lỗi đính kèm nếu có.\n\n{verdict}")
-        _clean_posted(folder)
-        return 1
-    posted = (folder / "da-dang.txt").read_text(encoding="utf-8").splitlines() if (folder / "da-dang.txt").exists() else []
-    ok = code == 0 and {"short-tin.mp4", "short-tien.mp4"} <= set(posted)
-    detail = "Đủ 2 Short: tin 8:00 và tiền 16:00 giờ miền Đông." if ok else f"Chỉ đăng được {len(posted)} trên 2 Short."
-    _report(folder, when, ok, detail + "\n\n" + verdict)
-    _clean_posted(folder)
-    return code
+    return uploader.schedule(folder)
 
 
 def _clean_posted(folder: Path) -> None:

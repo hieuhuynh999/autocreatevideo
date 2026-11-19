@@ -46,7 +46,7 @@ def cut(source: Path, dest: Path, seconds: float = 35) -> Path:
             ffmpeg, "-y", "-i", str(source), "-t", f"{length:.2f}",
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "0:a:0?",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", "30",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
             "-movflags", "+faststart",
             str(dest),
