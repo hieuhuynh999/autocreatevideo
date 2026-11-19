@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -82,35 +83,47 @@ def _http_url(url: str) -> str:
     return ""
 
 
+def _real_photo(url: str, width: int = 0) -> str:
+    text = _http_url(url)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if "npr-rss-pixel" in lowered or "/tracking/" in lowered or "pixel.png" in lowered:
+        return ""
+    if 0 < width < 400:
+        return ""
+    return text
+
+
 def _image_url(item: ET.Element) -> str:
     best = ""
     best_width = -1
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
-        url = _http_url(node.get("url") or "")
-        if not url:
-            continue
         try:
             width = int(node.get("width") or 0)
         except ValueError:
             width = 0
+        url = _real_photo(node.get("url") or "", width)
+        if not url:
+            continue
         if width >= best_width:
             best, best_width = url, width
     if best:
         return best
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
     if thumb is not None:
-        found_thumb = _http_url(thumb.get("url") or "")
+        found_thumb = _real_photo(thumb.get("url") or "")
         if found_thumb:
             return found_thumb
     enclosed = item.find("enclosure")
     if enclosed is not None and "image" in (enclosed.get("type") or ""):
-        found_file = _http_url(enclosed.get("url") or "")
+        found_file = _real_photo(enclosed.get("url") or "")
         if found_file:
             return found_file
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
     for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
-        found_src = _http_url(candidate)
+        found_src = _real_photo(candidate)
         if found_src:
             return found_src
     return ""
@@ -363,8 +376,15 @@ def news_script(when: datetime, groups: list[list[Story]], folder: Path) -> tupl
     ready: list[dict] = []
     for lead, others in chosen:
         dest = pictures / f"{len(ready):02d}.img"
-        if not _save_image(lead.image, dest):
+        saved = None
+        for candidate in (lead, *others):
+            if candidate.image and _save_image(candidate.image, dest):
+                saved = candidate
+                break
+        if saved is None:
             continue
+        lead = saved
+        others = [item for item in others if item.link != lead.link]
         different = [item for item in others if _family(item.outlet) != _family(lead.outlet)]
         outlets = [_family(lead.outlet)]
         for item in different:
@@ -919,6 +939,19 @@ def _build_news_video(folder: Path, when: datetime, used: list[dict]) -> Path:
     return out
 
 
+def _write_story_index(folder: Path, used: list[dict]) -> None:
+    payload = [
+        {
+            "outlet": item["outlet"],
+            "title": item["title"],
+            "link": item["link"],
+            "confirmed": item["confirmed"],
+        }
+        for item in used
+    ]
+    (folder / "tin.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     when = datetime.now(NY)
     if os.environ.get("US_DAILY_DAY"):
@@ -938,6 +971,7 @@ def main() -> int:
         for other in item["others"]:
             sources.append(f"Related, not read in full: {other['outlet']}: {other['title']}")
             sources.append(other["link"])
+    _write_story_index(folder, used)
     video_note = "Chưa ghép video tin."
     if used:
         try:
