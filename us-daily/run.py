@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
 import sys
 import urllib.request
+from io import BytesIO
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -282,13 +284,16 @@ def _save_image(url: str, dest: Path) -> bool:
     url = _http_url(url)
     if not url:
         return False
+    lowered = url.lower()
+    if any(word in lowered for word in ("pixel", "tracker", "beacon", "1x1", "spacer", "analytics")):
+        return False
     request = urllib.request.Request(url, headers={"User-Agent": IMAGE_UA, "Referer": "https://www.google.com/"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             data = response.read()
     except Exception:
         return False
-    if len(data) < 2000:
+    if len(data) < 4000:
         return False
     if not (
         data.startswith(b"\xff\xd8")
@@ -296,6 +301,16 @@ def _save_image(url: str, dest: Path) -> bool:
         or data.startswith(b"RIFF")
         or data.startswith(b"GIF")
     ):
+        return False
+    try:
+        from PIL import Image
+
+        photo = Image.open(BytesIO(data))
+        photo.load()
+        width, height = photo.size
+    except Exception:
+        return False
+    if width < 240 or height < 160:
         return False
     dest.write_bytes(data)
     small = dest.with_suffix(".jpg")
@@ -959,6 +974,22 @@ def main() -> int:
     for name, text in files.items():
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
+    (folder / "tin.json").write_text(
+        json.dumps(
+            [
+                {
+                    "outlet": item["outlet"],
+                    "title": item["title"],
+                    "link": item["link"],
+                    "confirmed": item["confirmed"],
+                }
+                for item in used
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(files["review.md"])
     return 0 if "tin và một bài tiền đủ để thu" in files["review.md"] else 1
 
