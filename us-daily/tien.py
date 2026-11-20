@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.util
+import json
 import math
 import os
 import subprocess
@@ -71,6 +72,16 @@ FUND_BOARD = (
     ("autopay", ("day after payday", "set the transfer")),
     ("advice", ("not personal", "not a projection")),
 )
+HOUSE_BOARD = (
+    ("open", ("here is the number",)),
+    ("lease", ("one example", "not your lease")),
+    ("house", ("3 percent down", "as low as 3 percent")),
+    ("costs", ("cash to close", "closing costs", "sit on top")),
+    ("guide", ("source for the rule",)),
+    ("insurance", ("mortgage insurance", "example fails")),
+    ("weeknote", ("this week",)),
+    ("notadvice", ("not personal financial advice",)),
+)
 
 
 def _load(name: str):
@@ -89,6 +100,8 @@ def _marks(words):
         board = CARD_BOARD
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
+    elif "3 percent down" in sample or "as low as 3 percent" in sample:
+        board = HOUSE_BOARD
     else:
         board = (
             ("open", ("here is the number",)),
@@ -413,6 +426,11 @@ def _pen_tip(name: str, unit: float, second: float):
     return (500 + 380 * unit, 330)
 
 
+def _badge(draw, fonts, number: str) -> None:
+    draw.rounded_rectangle((210, 52, 520, 124), radius=12, fill=(255, 248, 230), outline=INK, width=4)
+    _text(draw, (228, 64), number, fonts["mid"], (186, 48, 36))
+
+
 def _act(draw, fonts, name: str, unit: float, second: float, index: int, number: str) -> None:
     _room(draw, index)
     unit = max(0.0, min(1.0, unit))
@@ -592,6 +610,50 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
+    elif name == "lease":
+        _badge(draw, fonts, number)
+        _text(draw, (260, 200), "one household example", fonts["mid"], INK)
+        _text(draw, (260, 280), "not your loan", fonts["small"], (120, 50, 40))
+    elif name == "house":
+        _badge(draw, fonts, number)
+        draw.polygon([(780, 250), (930, 140), (1080, 250)], fill=(186, 92, 72), outline=INK)
+        draw.rectangle((820, 250, 1040, 430), fill=(232, 214, 186), outline=INK, width=4)
+        door = 30 + int(50 * unit)
+        draw.rectangle((900, 430 - door, 960, 430), fill=(120, 78, 42))
+        _text(draw, (240, 180), "3% of $300,000", fonts["mid"], INK)
+    elif name == "costs":
+        _badge(draw, fonts, number)
+        _text(draw, (250, 170), "down payment", fonts["small"], INK)
+        _text(draw, (250, 220), number, fonts["mid"], (186, 48, 36))
+        _text(draw, (250, 310), "closing costs on top", fonts["small"], INK)
+        _text(draw, (250, 360), "$6,000 to $15,000", fonts["mid"], NAVY)
+    elif name == "guide":
+        _badge(draw, fonts, number)
+        draw.rounded_rectangle((240, 170, 1080, 430), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (280, 210), "CFPB down-payment guide", fonts["small"], INK)
+        _text(draw, (280, 290), number, fonts["mid"], (186, 48, 36))
+    elif name == "insurance":
+        _badge(draw, fonts, number)
+        _text(draw, (240, 170), "under 20% down", fonts["mid"], (186, 48, 36))
+        _text(draw, (240, 250), "mortgage insurance", fonts["small"], INK)
+        _text(draw, (240, 310), "stays on the bill", fonts["small"], INK)
+        draw.polygon(
+            [(980, 180), (1100, 230), (1100, 340), (980, 400), (860, 340), (860, 230)],
+            outline=INK,
+            fill=(255, 236, 170),
+        )
+    elif name == "weeknote":
+        _badge(draw, fonts, number)
+        lines = (number, "+ $6,000 to $15,000", "price $300,000")
+        shown = min(len(lines), 1 + int(unit * 3))
+        for row, line in enumerate(lines[:shown]):
+            y = 170 + row * 90
+            draw.rounded_rectangle((240, y, 980, y + 72), radius=12, fill=(255, 252, 244), outline=INK, width=4)
+            _text(draw, (270, y + 16), line, fonts["small"], INK)
+    elif name == "notadvice":
+        _badge(draw, fonts, number)
+        _text(draw, (260, 200), "not personal", fonts["mid"], INK)
+        _text(draw, (260, 280), "financial advice", fonts["small"], (120, 50, 40))
     else:
         draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
         _text(draw, (470, 210), "an example", fonts["mid"], INK)
@@ -684,6 +746,19 @@ def main() -> int:
     print(item["title"], item["words"])
     text = run._package("finance", item["spoken"], item["title"], [item["source"]], shot)
     (folder / "finance-1.txt").write_text(text, encoding="utf-8")
+    (folder / "tien.json").write_text(
+        json.dumps(
+            {
+                "title": item["title"],
+                "number": item["number"],
+                "source": item["source"],
+                "spoken": item["spoken"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     audio = folder / "tai-chinh-1.mp3"
     words = asyncio.run(run._speak_timed(item["spoken"], audio))
     dest = folder / "tai-chinh-1.mp4"
