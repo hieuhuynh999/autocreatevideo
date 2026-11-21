@@ -114,6 +114,19 @@ def _upload(token: str, item: dict) -> str:
     return f"https://youtu.be/{video_id} lúc {publish_at}" if video_id else publish_at
 
 
+def _channel(token: str) -> str:
+    request = urllib.request.Request(
+        "https://www.googleapis.com/youtube/v3/channels?part=id&mine=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode())
+    items = payload.get("items") or []
+    if not items:
+        return ""
+    return str(items[0].get("id", ""))
+
+
 def schedule(folder: Path) -> int:
     manifest = folder / "lich.json"
     if not manifest.exists():
@@ -131,6 +144,16 @@ def schedule(folder: Path) -> int:
             "YOUTUBE_CLIENT_SECRET và YOUTUBE_REFRESH_TOKEN. Không gõ mật khẩu."
         )
         return 0
+    try:
+        mine = _channel(token)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {401, 403}:
+            print("Không đọc được kênh của token. Không in nội dung lỗi.")
+            return 1
+        mine = ""
+    if mine and mine != CHANNEL:
+        print(f"Token không thuộc kênh {CHANNEL}. Không tải lên, không gõ mật khẩu.")
+        return 1
     for item in items:
         path = Path(item["file"])
         if not path.exists():

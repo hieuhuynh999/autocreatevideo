@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -46,6 +47,7 @@ STOP = {
     "from", "with", "after", "over", "into", "its", "it", "is", "are", "was",
     "us", "u", "s", "new", "says", "say", "how", "what", "why", "who",
 }
+PIXEL = re.compile(r"(pixel|beacon|spacer|1x1|tracking|cleardot|trans\.gif)", re.I)
 
 
 @dataclass
@@ -82,35 +84,48 @@ def _http_url(url: str) -> str:
     return ""
 
 
+def _photo_url(url: str, width: int = 0, height: int = 0) -> str:
+    found = _http_url(url)
+    if not found or PIXEL.search(found):
+        return ""
+    if (0 < width < 240) or (0 < height < 160):
+        return ""
+    return found
+
+
 def _image_url(item: ET.Element) -> str:
     best = ""
     best_width = -1
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
-        url = _http_url(node.get("url") or "")
-        if not url:
-            continue
         try:
             width = int(node.get("width") or 0)
         except ValueError:
             width = 0
-        if width >= best_width:
+        try:
+            height = int(node.get("height") or 0)
+        except ValueError:
+            height = 0
+        url = _photo_url(node.get("url") or "", width, height)
+        if not url:
+            continue
+        if not best or width > best_width:
             best, best_width = url, width
     if best:
         return best
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
     if thumb is not None:
-        found_thumb = _http_url(thumb.get("url") or "")
+        found_thumb = _photo_url(thumb.get("url") or "")
         if found_thumb:
             return found_thumb
     enclosed = item.find("enclosure")
     if enclosed is not None and "image" in (enclosed.get("type") or ""):
-        found_file = _http_url(enclosed.get("url") or "")
+        found_file = _photo_url(enclosed.get("url") or "")
         if found_file:
             return found_file
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
     for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
-        found_src = _http_url(candidate)
+        found_src = _photo_url(candidate)
         if found_src:
             return found_src
     return ""
@@ -296,6 +311,16 @@ def _save_image(url: str, dest: Path) -> bool:
         or data.startswith(b"RIFF")
         or data.startswith(b"GIF")
     ):
+        return False
+    from io import BytesIO
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+    except Exception:
+        return False
+    if width < 240 or height < 160:
         return False
     dest.write_bytes(data)
     small = dest.with_suffix(".jpg")
@@ -959,6 +984,14 @@ def main() -> int:
     for name, text in files.items():
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
+    (folder / "bai.json").write_text(
+        json.dumps(
+            [{"outlet": item["outlet"], "title": item["title"], "link": item["link"]} for item in used],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(files["review.md"])
     return 0 if "tin và một bài tiền đủ để thu" in files["review.md"] else 1
 
