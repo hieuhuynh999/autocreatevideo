@@ -12,6 +12,7 @@ import asyncio
 import importlib.util
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -81,6 +82,36 @@ def _load(name: str):
     return module
 
 
+def _sentence_marks(words):
+    """Mỗi câu một cảnh. Số của bài nằm ở cảnh đầu và các cảnh sau."""
+    found = []
+    fresh = True
+    icons = ("cash", "house", "paper", "rule")
+    icon_at = 0
+    for index, (start, _end, token) in enumerate(words):
+        if fresh:
+            window = " ".join(item[2] for item in words[index:index + 14]).lower()
+            if not found:
+                name = "open"
+            elif "not personal" in window:
+                name = "advice"
+            elif window.startswith("this week"):
+                name = "week"
+            elif "source for the rule" in window or window.startswith("the source"):
+                name = "paper"
+            elif any(word in window for word in ("home", "house", "mortgage", "down payment", "fha")):
+                name = "house"
+            else:
+                name = icons[icon_at % len(icons)]
+                icon_at += 1
+            found.append((start, name, token))
+            fresh = False
+        stripped = token.strip()
+        if stripped.endswith((".", "!", "?")) or stripped in {".", "!", "?"}:
+            fresh = True
+    return found
+
+
 def _marks(words):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
@@ -90,11 +121,10 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        found = _sentence_marks(words)
+        if not found and words:
+            found.append((words[0][0], "open", words[0][2]))
+        return found
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -145,13 +175,23 @@ def _live_line(words, second: float) -> str:
             break
     window = words[max(0, index - 6) : index + 5]
     bits: list[str] = []
+    previous = ""
+    weak = {"the", "a", "an", "of", "to", "and", "in", "on", "for", "is", "as", "at", "by", "or"}
     for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+        new_sentence = (
+            bits
+            and previous[:1].islower()
+            and previous.lower().strip(".,!?;:") not in weak
+            and token[:1].isupper()
+            and not token.isupper()
+        )
+        if new_sentence:
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        previous = token
     return "".join(bits)
 
 
@@ -405,7 +445,7 @@ def _pen_tip(name: str, unit: float, second: float):
         item = 0 if unit < 0.55 else 1
         return (500 + item * 280, 210)
     if name == "week":
-        return (405 + int(unit * 6) * 110, 170)
+        return (405 + int(unit * 6) * 110, 250)
     if name == "autopay":
         return (540 + 260 * unit, 290)
     if name == "cut":
@@ -413,13 +453,22 @@ def _pen_tip(name: str, unit: float, second: float):
     return (500 + 380 * unit, 330)
 
 
+def _number_font(fonts, number: str, largest: int, max_width: int):
+    size = largest
+    while size > 32:
+        face = fonts["grow"](size)
+        if face.getlength(number) <= max_width:
+            return face
+        size -= 4
+    return fonts["grow"](32)
+
+
 def _act(draw, fonts, name: str, unit: float, second: float, index: int, number: str) -> None:
     _room(draw, index)
     unit = max(0.0, min(1.0, unit))
     if name == "open":
-        size = 36 + int(56 * unit)
-        font = fonts["grow"](size)
-        _text(draw, (520, 150), number, font, (186, 48, 36))
+        font = _number_font(fonts, number, 36 + int(56 * unit), 760)
+        _text(draw, (260, 150), number, font, (186, 48, 36))
         for item in range(4):
             _coin(draw, 430 + int((160 + item * 40) * unit), 360 - int(80 * math.sin(second * 3 + item)), 16)
     elif name == "card":
@@ -583,20 +632,36 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
                 draw.line((x + 30, 210, x + 70, 260), fill=(36, 140, 72), width=8)
                 draw.line((x + 70, 260, x + 150, 150), fill=(36, 140, 72), width=8)
     elif name == "week":
+        face = _number_font(fonts, number, 72, 900)
+        _text(draw, (int((W - face.getlength(number)) / 2), 48), number, face, (186, 48, 36))
         for day in range(7):
             x = 360 + day * 110
             fill = GOLD if day == int(unit * 6) else (255, 255, 255)
-            draw.rounded_rectangle((x, 160, x + 90, 280), radius=8, fill=fill, outline=INK, width=3)
-        draw.ellipse((360 + int(unit * 6) * 110 - 8, 150, 470 + int(unit * 6) * 110, 300), outline=(186, 48, 36), width=5)
+            draw.rounded_rectangle((x, 200, x + 90, 320), radius=8, fill=fill, outline=INK, width=3)
+        draw.ellipse((360 + int(unit * 6) * 110 - 8, 190, 470 + int(unit * 6) * 110, 340), outline=(186, 48, 36), width=5)
     elif name == "autopay":
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
     else:
-        draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
-        _text(draw, (470, 210), "an example", fonts["mid"], INK)
-        _text(draw, (470, 270), "not a promise", fonts["small"], (120, 50, 40))
-        draw.line((470, 320, 470 + int(420 * unit), 320), fill=(120, 50, 40), width=6)
+        face = _number_font(fonts, number, 72, 900)
+        _text(draw, (int((W - face.getlength(number)) / 2), 48), number, face, (186, 48, 36))
+        if name == "house":
+            draw.polygon([(640, 210), (880, 360), (400, 360)], fill=(196, 90, 70), outline=INK)
+            draw.rectangle((490, 360, 790, 540), fill=(232, 214, 190), outline=INK, width=5)
+            draw.rectangle((600, 420, 690, 540), fill=(120, 74, 42), outline=INK, width=4)
+        elif name == "cash":
+            for item in range(5):
+                _coin(draw, 400 + item * 110, 300, 32)
+        elif name in {"paper", "rule"}:
+            draw.rounded_rectangle((420, 200, 980, 530), radius=12, fill=(255, 252, 242), outline=INK, width=5)
+            for row in range(4):
+                draw.rectangle((470, 250 + row * 60, 920, 278 + row * 60), fill=(220, 214, 200))
+        else:
+            draw.rounded_rectangle((420, 200, 980, 440), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+            _text(draw, (470, 260), "an example", fonts["mid"], INK)
+            _text(draw, (470, 330), "not a promise", fonts["small"], (120, 50, 40))
+            draw.line((470, 390, 470 + int(420 * unit), 390), fill=(120, 50, 40), width=6)
     tip_x, tip_y = _pen_tip(name, unit, second)
     _host(draw, tip_x, tip_y, second)
 
@@ -630,8 +695,108 @@ def _frame(words, marks, fonts, number: str, second: float):
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _pieces(text: str) -> list[str]:
+    chunks: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z])", line)
+        chunks.extend(part.strip() for part in parts if part.strip())
+    return chunks
+
+
+def _piece_name(text: str, first: bool) -> str:
+    sample = text.lower()
+    if first or sample.startswith("here is the number"):
+        return "open"
+    if "not personal" in sample:
+        return "advice"
+    if sample.startswith("this week"):
+        return "week"
+    if "source" in sample:
+        return "paper"
+    if any(word in sample for word in ("home", "house", "mortgage", "down payment", "fha")):
+        return "house"
+    return "cash"
+
+
+def _plain(token: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", token.lower())
+
+
+def _marks_from_script(script: str, words) -> list[tuple[float, str, str]]:
+    """Gắn mỗi câu trong bài với từ đầu tiên mà giọng đọc khớp."""
+    marks = []
+    cursor = 0
+    flat = [_plain(token) for _start, _end, token in words]
+    for piece in _pieces(script):
+        bits = [_plain(word) for word in piece.split() if _plain(word)]
+        if not bits:
+            continue
+        first = bits[0]
+        found = None
+        for index in range(cursor, len(flat)):
+            heard = flat[index]
+            if heard == first or heard.startswith(first) or first.startswith(heard):
+                found = index
+                break
+        if found is None:
+            continue
+        start, _end, token = words[found]
+        marks.append((start, _piece_name(piece, not marks), token))
+        cursor = found + 1
+    if not marks and words:
+        marks.append((words[0][0], "open", words[0][2]))
+    return marks
+
+
+async def _one_take(run, text: str, dest: Path):
+    words = await run._speak_timed(text, dest)
+    return words, _marks_from_script(text, words)
+
+
+async def _speak_pieces(run, text: str, dest: Path):
+    """Đọc từng câu rồi ghép, để mỗi câu là một cảnh."""
+    pieces = _pieces(text)
+    words = []
+    marks = []
+    clips: list[Path] = []
+    cursor = 0.0
+    for index, piece in enumerate(pieces):
+        clip = dest.with_name(f"tien-cau-{index}.mp3")
+        try:
+            timed = await run._speak_timed(piece, clip)
+        except Exception as exc:
+            print(f"Đọc từng câu bị lỗi ({exc.__class__.__name__}). Đọc cả bài một lần.")
+            return await _one_take(run, text, dest)
+        if not timed:
+            continue
+        base = timed[0][0]
+        span = max(0.2, timed[-1][1] - base)
+        marks.append((cursor, _piece_name(piece, not marks), timed[0][2]))
+        for start, end, token in timed:
+            words.append((cursor + (start - base), cursor + (end - base), token))
+        cursor += span + 0.08
+        clips.append(clip)
+    if not clips:
+        raise RuntimeError("không nhận được giọng đọc bài tiền")
+    listing = dest.with_name("tien-audio.txt")
+    listing.write_text("".join(f"file '{clip.as_posix()}'\n" for clip in clips), encoding="utf-8")
+    ffmpeg = _load("but_ve")._ffmpeg_bin()
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c:a", "libmp3lame", "-q:a", "4", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not dest.exists():
+        raise RuntimeError(proc.stderr[-400:])
+    return words, marks
+
+
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, marks=None) -> None:
+    if marks is None:
+        marks = _marks(words)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -685,9 +850,15 @@ def main() -> int:
     text = run._package("finance", item["spoken"], item["title"], [item["source"]], shot)
     (folder / "finance-1.txt").write_text(text, encoding="utf-8")
     audio = folder / "tai-chinh-1.mp3"
-    words = asyncio.run(run._speak_timed(item["spoken"], audio))
+    sample = item["spoken"].lower()
+    special = any(phrase in sample for phrase in ("card balance", "the trap", "twenty-four thousand", "index fund"))
+    if special:
+        words = asyncio.run(run._speak_timed(item["spoken"], audio))
+        marks = None
+    else:
+        words, marks = asyncio.run(_speak_pieces(run, item["spoken"], audio))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], marks)
     print(dest)
     return 0
 
