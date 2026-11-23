@@ -12,6 +12,7 @@ import asyncio
 import importlib.util
 import math
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -81,6 +82,22 @@ def _load(name: str):
     return module
 
 
+def _sentence_marks(words):
+    """Mỗi câu một cảnh. Số của ngày vẫn nằm trên hình suốt video."""
+    names = ("open", "statement", "boxes", "city", "folder", "week", "autopay", "advice")
+    found = []
+    expect_new = True
+    for start, _end, token in words:
+        if expect_new and token.strip():
+            found.append((start, names[len(found) % len(names)], token))
+            expect_new = False
+        if token.rstrip().endswith((".", "!", "?")):
+            expect_new = True
+    if not found and words:
+        found.append((words[0][0], "open", words[0][2]))
+    return found
+
+
 def _marks(words):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
@@ -90,11 +107,7 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        return _sentence_marks(words)
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -145,13 +158,16 @@ def _live_line(words, second: float) -> str:
             break
     window = words[max(0, index - 6) : index + 5]
     bits: list[str] = []
-    for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+    previous_end = None
+    for start, end, token in window:
+        pause = previous_end is not None and start - previous_end > 0.45
+        if bits and pause:
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        previous_end = end
     return "".join(bits)
 
 
@@ -618,6 +634,14 @@ def _fonts(draw_mod) -> dict:
     }
 
 
+def _number_badge(draw, fonts, number: str) -> None:
+    face = fonts["small"]
+    width = int(face.getlength(number)) + 36
+    x0 = max(24, W - 36 - width)
+    draw.rounded_rectangle((x0, 24, x0 + width, 84), radius=12, fill=(186, 48, 36))
+    _text(draw, (x0 + 18, 34), number, face, (255, 255, 255))
+
+
 def _frame(words, marks, fonts, number: str, second: float):
     image = Image.new("RGB", (W, H), (255, 255, 255))
     draw = ImageDraw.Draw(image)
@@ -626,12 +650,60 @@ def _frame(words, marks, fonts, number: str, second: float):
     end = marks[index + 1][0] if index + 1 < len(marks) else words[-1][1]
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
+    _number_badge(draw, fonts, number)
     _caption(draw, fonts["caption"], _live_line(words, second))
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _line_marks(words, starts: list[float]):
+    names = ("open", "statement", "boxes", "city", "folder", "week", "autopay", "advice")
+    marks = []
+    for index, start in enumerate(starts):
+        token = words[0][2] if words else ""
+        for word_start, _end, word in words:
+            if word_start + 0.05 >= start:
+                token = word
+                break
+        marks.append((start, names[index % len(names)], token))
+    if not marks and words:
+        marks.append((words[0][0], "open", words[0][2]))
+    return marks
+
+
+async def _speak_lines(run, lines: list[str], dest: Path):
+    """Mỗi dòng lời là một đoạn giọng, để cảnh đổi đúng câu."""
+    ffmpeg = run._ffmpeg()
+    work = dest.parent / "tien-giong"
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True, exist_ok=True)
+    words_all = []
+    starts = []
+    pieces = []
+    offset = 0.0
+    for index, line in enumerate(lines):
+        part = work / f"{index:02d}.mp3"
+        spoken = await run._speak_timed(line, part)
+        starts.append(offset)
+        for start, end, token in spoken:
+            words_all.append((start + offset, end + offset, token))
+        pieces.append(part)
+        offset += run._media_duration(ffmpeg, part)
+    listing = work / "list.txt"
+    listing.write_text("".join(f"file '{piece.as_posix()}'\n" for piece in pieces), encoding="utf-8")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not dest.exists():
+        raise RuntimeError((proc.stderr or "")[-400:])
+    return words_all, starts
+
+
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, marks=None) -> None:
+    if not marks:
+        marks = _marks(words)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -685,9 +757,10 @@ def main() -> int:
     text = run._package("finance", item["spoken"], item["title"], [item["source"]], shot)
     (folder / "finance-1.txt").write_text(text, encoding="utf-8")
     audio = folder / "tai-chinh-1.mp3"
-    words = asyncio.run(run._speak_timed(item["spoken"], audio))
+    lines = [line.strip() for line in item["spoken"].splitlines() if line.strip()]
+    words, starts = asyncio.run(_speak_lines(run, lines, audio))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], _line_marks(words, starts))
     print(dest)
     return 0
 
