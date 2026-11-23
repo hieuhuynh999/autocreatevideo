@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import io
+import json
 import os
 import re
 import subprocess
@@ -58,6 +60,7 @@ class Story:
     image: str
     order: int
     feed: int
+    alts: str = ""
 
 
 def _text(node: ET.Element | None) -> str:
@@ -82,38 +85,70 @@ def _http_url(url: str) -> str:
     return ""
 
 
-def _image_url(item: ET.Element) -> str:
-    best = ""
-    best_width = -1
+def _pixelish(url: str) -> bool:
+    lowered = url.lower()
+    keys = (
+        "pixel", "spacer", "beacon", "1x1", "tracking", "analytics",
+        "facebook.com/tr", "doubleclick", "scorecardresearch", "npr-rss-pixel",
+    )
+    return any(key in lowered for key in keys)
+
+
+def _declared_size(node: ET.Element) -> tuple[int, int]:
+    try:
+        width = int(node.get("width") or 0)
+    except ValueError:
+        width = 0
+    try:
+        height = int(node.get("height") or 0)
+    except ValueError:
+        height = 0
+    return width, height
+
+
+def _keep_image(url: str, width: int = 0, height: int = 0) -> bool:
+    if not url or _pixelish(url):
+        return False
+    if 0 < width < 240 or 0 < height < 160:
+        return False
+    return True
+
+
+def _image_urls(item: ET.Element) -> list[str]:
+    ranked: list[tuple[int, int, str]] = []
+
+    def add(url: str, width: int, height: int) -> None:
+        if _keep_image(url, width, height):
+            ranked.append((width, len(ranked), url))
+
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
-        url = _http_url(node.get("url") or "")
-        if not url:
-            continue
-        try:
-            width = int(node.get("width") or 0)
-        except ValueError:
-            width = 0
-        if width >= best_width:
-            best, best_width = url, width
-    if best:
-        return best
+        width, height = _declared_size(node)
+        add(_http_url(node.get("url") or ""), width, height)
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
     if thumb is not None:
-        found_thumb = _http_url(thumb.get("url") or "")
-        if found_thumb:
-            return found_thumb
+        width, height = _declared_size(thumb)
+        add(_http_url(thumb.get("url") or ""), width, height)
     enclosed = item.find("enclosure")
     if enclosed is not None and "image" in (enclosed.get("type") or ""):
-        found_file = _http_url(enclosed.get("url") or "")
-        if found_file:
-            return found_file
+        add(_http_url(enclosed.get("url") or ""), 0, 0)
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
     for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
-        found_src = _http_url(candidate)
-        if found_src:
-            return found_src
-    return ""
+        add(_http_url(candidate), 0, 0)
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for _width, _order, url in ranked:
+        if url in seen:
+            continue
+        seen.add(url)
+        ordered.append(url)
+    return ordered
+
+
+def _image_url(item: ET.Element) -> str:
+    urls = _image_urls(item)
+    return urls[0] if urls else ""
 
 
 def _parse_feed(outlet: str, url: str, feed: int) -> list[Story]:
@@ -132,9 +167,11 @@ def _parse_feed(outlet: str, url: str, feed: int) -> list[Story]:
             link = link_node.get("href", "") if link_node is not None else ""
         summary = _text(item.find("description")) or _text(item.find("{http://www.w3.org/2005/Atom}summary"))
         author = _text(item.find("{http://purl.org/dc/elements/1.1/}creator")) or _text(item.find("author"))
-        image = _image_url(item)
-        if title and link and image:
-            stories.append(Story(outlet, title, link, summary[:520], author, image, index, feed))
+        images = _image_urls(item)
+        if title and link and images:
+            stories.append(
+                Story(outlet, title, link, summary[:520], author, images[0], index, feed, "|".join(images[1:8]))
+            )
     return stories
 
 
@@ -280,7 +317,7 @@ def _pick(groups: list[list[Story]]) -> list[tuple[Story, list[Story]]]:
 
 def _save_image(url: str, dest: Path) -> bool:
     url = _http_url(url)
-    if not url:
+    if not url or _pixelish(url):
         return False
     request = urllib.request.Request(url, headers={"User-Agent": IMAGE_UA, "Referer": "https://www.google.com/"})
     try:
@@ -288,27 +325,24 @@ def _save_image(url: str, dest: Path) -> bool:
             data = response.read()
     except Exception:
         return False
-    if len(data) < 2000:
+    if len(data) < 1500:
         return False
-    if not (
-        data.startswith(b"\xff\xd8")
-        or data.startswith(b"\x89PNG")
-        or data.startswith(b"RIFF")
-        or data.startswith(b"GIF")
-    ):
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if width < 240 or height < 160:
+                return False
+            rgb = image.convert("RGB")
+            if rgb.width > 1680:
+                height = max(1, int(rgb.height * 1680 / rgb.width))
+                rgb = rgb.resize((1680, height), Image.Resampling.LANCZOS)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            rgb.save(dest, "JPEG", quality=88)
+    except Exception:
         return False
-    dest.write_bytes(data)
-    small = dest.with_suffix(".jpg")
-    proc = subprocess.run(
-        [_ffmpeg(), "-y", "-i", str(dest), "-vf", "scale=1680:-2", "-q:v", "3", str(small)],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode == 0 and small.stat().st_size > 2000:
-        small.replace(dest)
-    else:
-        small.unlink(missing_ok=True)
-    return True
+    return dest.exists() and dest.stat().st_size > 2000
 
 
 def _ahead(title: str) -> str:
@@ -363,7 +397,8 @@ def news_script(when: datetime, groups: list[list[Story]], folder: Path) -> tupl
     ready: list[dict] = []
     for lead, others in chosen:
         dest = pictures / f"{len(ready):02d}.img"
-        if not _save_image(lead.image, dest):
+        urls = [lead.image, *[part for part in lead.alts.split("|") if part]]
+        if not any(_save_image(url, dest) for url in urls):
             continue
         different = [item for item in others if _family(item.outlet) != _family(lead.outlet)]
         outlets = [_family(lead.outlet)]
@@ -730,34 +765,89 @@ def _media_duration(ffmpeg: str, path: Path) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
+def _speech_chunks(text: str, limit: int = 70) -> list[str]:
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part.strip()]
+    if not sentences:
+        return [text.strip()] if text.strip() else []
+    groups: list[str] = []
+    current: list[str] = []
+    count = 0
+    for sentence in sentences:
+        words = len(sentence.split())
+        if current and count + words > limit:
+            groups.append(" ".join(current))
+            current, count = [], 0
+        current.append(sentence)
+        count += words
+    if current:
+        groups.append(" ".join(current))
+    return groups
+
+
+async def _speak_once(text: str, dest: Path) -> list[tuple[float, float, str]]:
     import edge_tts
 
+    voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
+    audio = bytearray()
+    words: list[tuple[float, float, str]] = []
+    async for chunk in voice.stream():
+        if chunk["type"] == "audio":
+            audio.extend(chunk["data"])
+        elif chunk["type"] == "WordBoundary":
+            start = chunk["offset"] / 10_000_000
+            end = start + chunk["duration"] / 10_000_000
+            token = str(chunk["text"]).strip()
+            if token:
+                words.append((start, end, token))
+    if not audio or not words:
+        raise RuntimeError("no audio")
+    dest.write_bytes(bytes(audio))
+    return words
+
+
+async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
     last_error: Exception | None = None
-    for attempt in range(7):
-        voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
-        audio = bytearray()
-        words: list[tuple[float, float, str]] = []
+    for attempt in range(3):
         try:
-            async for chunk in voice.stream():
-                if chunk["type"] == "audio":
-                    audio.extend(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    start = chunk["offset"] / 10_000_000
-                    end = start + chunk["duration"] / 10_000_000
-                    token = str(chunk["text"]).strip()
-                    if token:
-                        words.append((start, end, token))
+            return await _speak_once(text, dest)
         except Exception as exc:
             last_error = exc
-            await asyncio.sleep(10 * (attempt + 1))
-            continue
-        if audio and words:
-            dest.write_bytes(bytes(audio))
-            return words
-        last_error = RuntimeError("no audio")
-        await asyncio.sleep(10 * (attempt + 1))
-    raise RuntimeError("không nhận được giọng đọc") from last_error
+            await asyncio.sleep(8 * (attempt + 1))
+    chunks = _speech_chunks(text)
+    if len(chunks) <= 1:
+        raise RuntimeError("không nhận được giọng đọc") from last_error
+    ffmpeg = _ffmpeg()
+    work = dest.parent / f"{dest.stem}-giong"
+    work.mkdir(parents=True, exist_ok=True)
+    pieces: list[Path] = []
+    words_all: list[tuple[float, float, str]] = []
+    offset = 0.0
+    for index, chunk in enumerate(chunks):
+        part = work / f"{index:02d}.mp3"
+        spoken: list[tuple[float, float, str]] | None = None
+        for attempt in range(4):
+            try:
+                spoken = await _speak_once(chunk, part)
+                break
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(6 * (attempt + 1))
+        if not spoken:
+            raise RuntimeError("không nhận được giọng đọc") from last_error
+        for start, end, token in spoken:
+            words_all.append((start + offset, end + offset, token))
+        pieces.append(part)
+        offset += _media_duration(ffmpeg, part)
+    listing = work / "list.txt"
+    listing.write_text("".join(f"file '{piece.as_posix()}'\n" for piece in pieces), encoding="utf-8")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not dest.exists():
+        raise RuntimeError(proc.stderr[-400:])
+    return words_all
 
 
 def _cue_groups(words: list[tuple[float, float, str]]) -> list[list[tuple[float, float, str]]]:
@@ -956,6 +1046,14 @@ def main() -> int:
         ),
         "review.md": _review(when, finance, news, used, errors, video_note),
     }
+    (folder / "nguon.json").write_text(
+        json.dumps(
+            [{"outlet": item["outlet"], "title": item["title"], "link": item["link"]} for item in used],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     for name, text in files.items():
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
