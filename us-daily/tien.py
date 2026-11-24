@@ -12,6 +12,7 @@ import asyncio
 import importlib.util
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -81,7 +82,112 @@ def _load(name: str):
     return module
 
 
-def _marks(words):
+def _ends_sentence(token: str) -> bool:
+    if token in {"!", "?"}:
+        return True
+    if token.endswith("!") or token.endswith("?"):
+        return True
+    if not token.endswith("."):
+        return False
+    low = token.lower()
+    if low in {"u.s.", "u.k.", "mr.", "mrs.", "ms.", "dr.", "sen.", "rep.", "gen.", "jr.", "sr."}:
+        return False
+    stem = token[:-1].replace(",", "")
+    if stem.replace(".", "").isdigit():
+        return False
+    return True
+
+
+def _script_sentences(text: str) -> list[str]:
+    parts = re.findall(r".+?[.!?]+(?=\s|$)|.+$", " ".join(text.split()))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _scene_name(text: str, index: int) -> str:
+    low = text.lower()
+    if "here is the number" in low:
+        return "open"
+    if "one example for a household" in low or "not your lease" in low:
+        return "statement"
+    if "source for the rule" in low:
+        return "folder"
+    if "this week" in low:
+        return "week"
+    if "not personal" in low:
+        return "advice"
+    if "fail" in low:
+        return "risk"
+    if any(bit in low for bit in ("freddie", "survey", "percent")):
+        return "city"
+    if any(bit in low for bit in ("leaves out", "not inside", "does not include", "are extra", "on top")):
+        return "statement"
+    cycle = ("city", "pile", "onehouse", "folder", "ghost", "city")
+    return cycle[index % len(cycle)]
+
+
+def _plain(token: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", token.lower())
+
+
+def _marks_aligned(words, script: str):
+    """Giọng đọc bỏ dấu câu, nên mốc cảnh lấy từ từng câu của bài."""
+    sentences = _script_sentences(script)
+    if not sentences or not words:
+        return []
+    marks = []
+    wi = 0
+    for sentence in sentences:
+        target = _plain(sentence)
+        while wi < len(words) and not _plain(words[wi][2]):
+            wi += 1
+        if wi >= len(words) or not target:
+            break
+        start, _end, token = words[wi]
+        marks.append((start, _scene_name(sentence, len(marks)), token))
+        got = ""
+        while wi < len(words) and len(got) < len(target):
+            piece = _plain(words[wi][2])
+            if not piece:
+                wi += 1
+                continue
+            if target.startswith(got + piece):
+                got += piece
+                wi += 1
+                continue
+            break
+        if len(got) < len(target) * 0.6:
+            return []
+    if len(marks) < max(2, len(sentences) - 1):
+        return []
+    return marks
+
+
+def _sentence_marks(words):
+    """Mỗi câu một cảnh. Số của bài vẫn nằm ở góc trong suốt video."""
+    if not words:
+        return []
+    bounds = [0]
+    for index, (_start, _end, token) in enumerate(words[:-1]):
+        if _ends_sentence(token):
+            bounds.append(index + 1)
+    cycle = ("city", "multiply", "pile", "statement", "boxes", "folder")
+    used = 0
+    marks = []
+    for nth, word_index in enumerate(bounds):
+        start, _end, token = words[word_index]
+        stop = bounds[nth + 1] if nth + 1 < len(bounds) else len(words)
+        text = " ".join(words[i][2] for i in range(word_index, stop)).lower()
+        name = _scene_name(text, nth)
+        if name in {"open", "statement", "folder", "week", "advice", "risk", "boxes"}:
+            pass
+        else:
+            name = cycle[used % len(cycle)]
+            used += 1
+        marks.append((start, name, token))
+    return marks
+
+
+def _marks(words, script: str = ""):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
     sample = full.lower()
@@ -90,11 +196,11 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        if script:
+            aligned = _marks_aligned(words, script)
+            if aligned:
+                return aligned
+        return _sentence_marks(words)
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -311,6 +417,12 @@ def _column(draw, x, base, height, width, fill, label, font) -> None:
     height = max(8, int(height))
     draw.rounded_rectangle((x, base - height, x + width, base), radius=10, fill=fill, outline=INK, width=4)
     _text(draw, (x, base - height - 36), label, font, INK)
+
+
+def _badge(draw, font, number: str) -> None:
+    width = int(font.getlength(number)) + 36
+    draw.rounded_rectangle((196, 48, 196 + width, 112), radius=12, fill=(255, 248, 230), outline=(186, 48, 36), width=4)
+    _text(draw, (214, 60), number, font, (186, 48, 36))
 
 
 def _caption(draw, font, text: str) -> None:
@@ -626,12 +738,13 @@ def _frame(words, marks, fonts, number: str, second: float):
     end = marks[index + 1][0] if index + 1 < len(marks) else words[-1][1]
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
+    _badge(draw, fonts["mid"], number)
     _caption(draw, fonts["caption"], _live_line(words, second))
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, script: str = "") -> None:
+    marks = _marks(words, script)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -687,7 +800,7 @@ def main() -> int:
     audio = folder / "tai-chinh-1.mp3"
     words = asyncio.run(run._speak_timed(item["spoken"], audio))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], item["spoken"])
     print(dest)
     return 0
 
