@@ -592,6 +592,31 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
+    elif name == "note":
+        draw.rounded_rectangle((380, 180, 980, 420), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (430, 230), "one example", fonts["mid"], INK)
+        _text(draw, (430, 300), "one household", fonts["small"], INK)
+    elif name == "count":
+        _column(draw, 460, 480, 90 + 200 * unit, 160, NAVY, "counted", fonts["small"])
+        _text(draw, (460, 120), "in the number", fonts["small"], INK)
+    elif name == "leave":
+        draw.rounded_rectangle((400, 160, 960, 400), radius=16, outline=(120, 50, 40), width=6)
+        _text(draw, (460, 220), "left out", fonts["mid"], (120, 50, 40))
+        for item in range(4):
+            _coin(draw, 280 + int(80 * unit) + item * 36, 430, 14)
+    elif name == "source":
+        draw.rounded_rectangle((420, 150, 980, 470), radius=10, fill=(255, 252, 242), outline=INK, width=5)
+        for row in range(6):
+            draw.rectangle((470, 210 + row * 36, 920, 230 + row * 36), fill=(220, 214, 200))
+        _text(draw, (470, 160), "the source", fonts["small"], INK)
+    elif name == "fail":
+        draw.ellipse((500, 150, 800, 450), outline=(186, 48, 36), width=10)
+        _text(draw, (610, 230), "!", fonts["number"], (186, 48, 36))
+        _text(draw, (500, 470), "where it fails", fonts["small"], INK)
+    elif name == "advice":
+        draw.rounded_rectangle((380, 180, 1000, 420), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (430, 230), "not advice", fonts["mid"], (120, 50, 40))
+        _text(draw, (430, 300), "not your bill", fonts["small"], INK)
     else:
         draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
         _text(draw, (470, 210), "an example", fonts["mid"], INK)
@@ -627,11 +652,26 @@ def _frame(words, marks, fonts, number: str, second: float):
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
     _caption(draw, fonts["caption"], _live_line(words, second))
+    _badge(draw, fonts, number)
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _badge(draw, fonts, number: str) -> None:
+    """Số của đúng ngày nằm góc phải suốt video."""
+    size = 32 if len(number) > 12 else 44
+    font = fonts["grow"](size)
+    pad = 16
+    width = int(font.getlength(number)) + pad * 2
+    height = size + 18
+    x0 = max(24, W - 24 - width)
+    y0 = 48
+    draw.rounded_rectangle((x0, y0, x0 + width, y0 + height), radius=10, fill=(186, 48, 36))
+    _text(draw, (x0 + pad, y0 + 6), number, font, (255, 255, 255))
+
+
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, marks=None) -> None:
+    if not marks:
+        marks = _marks(words)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -667,6 +707,61 @@ def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
         raise RuntimeError(f"ffmpeg {dest.name} {code}")
 
 
+def _beats(lines: list[str]) -> list[str]:
+    names: list[str] = []
+    pool = ("open", "note", "count", "leave", "source", "fail")
+    pool_index = 0
+    for line in lines:
+        low = line.lower()
+        if "not personal financial advice" in low:
+            names.append("advice")
+        elif "this week" in low:
+            names.append("week")
+        else:
+            names.append(pool[pool_index % len(pool)])
+            pool_index += 1
+    return names
+
+
+async def _speak_lines(run, lines: list[str], folder: Path):
+    """Đọc từng câu. Edge-TTS hay rơi khi cả bài dài hơn một đoạn."""
+    work = folder / "loi"
+    work.mkdir(parents=True, exist_ok=True)
+    words: list[tuple[float, float, str]] = []
+    wavs: list[Path] = []
+    starts: list[float] = []
+    offset = 0.0
+    ffmpeg = run._ffmpeg()
+    for index, line in enumerate(lines):
+        mp3 = work / f"{index:02d}.mp3"
+        part = await run._speak_timed(line, mp3)
+        wav = work / f"{index:02d}.wav"
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-i", str(mp3), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not wav.exists():
+            raise RuntimeError(proc.stderr[-300:])
+        duration = run._media_duration(ffmpeg, wav)
+        starts.append(offset)
+        for start, end, token in part:
+            words.append((start + offset, end + offset, token))
+        wavs.append(wav)
+        offset += duration
+    listing = work / "list.txt"
+    listing.write_text("".join(f"file '{wav.as_posix()}'\n" for wav in wavs), encoding="utf-8")
+    audio = folder / "tai-chinh-1.wav"
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(audio)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not audio.exists():
+        raise RuntimeError(proc.stderr[-300:])
+    return words, audio, starts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--day", default=os.environ.get("US_DAILY_DAY", ""))
@@ -684,10 +779,18 @@ def main() -> int:
     print(item["title"], item["words"])
     text = run._package("finance", item["spoken"], item["title"], [item["source"]], shot)
     (folder / "finance-1.txt").write_text(text, encoding="utf-8")
-    audio = folder / "tai-chinh-1.mp3"
-    words = asyncio.run(run._speak_timed(item["spoken"], audio))
+    lines = [line.strip() for line in item["spoken"].splitlines() if line.strip()]
+    words, audio, starts = asyncio.run(_speak_lines(run, lines, folder))
+    sample = " ".join(token for _start, _end, token in words).lower()
+    marks = None
+    if not any(phrase in sample for phrase in ("card balance", "the trap", "twenty-four thousand", "index fund")):
+        beats = _beats(lines)
+        marks = []
+        for index, start in enumerate(starts):
+            token = next((text for word_start, _end, text in words if word_start >= start - 0.05), "")
+            marks.append((start, beats[index], token))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], marks)
     print(dest)
     return 0
 
