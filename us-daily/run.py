@@ -278,6 +278,27 @@ def _pick(groups: list[list[Story]]) -> list[tuple[Story, list[Story]]]:
     return chosen
 
 
+def _real_photo(url: str, data: bytes) -> bool:
+    """Ảnh bài phải đủ lớn. Pixel theo dõi và ảnh tí hon không được lên hình."""
+    lower = url.lower()
+    if any(flag in lower for flag in ("/pixel", "1x1", "tracking", "spacer", "beacon", "analytics", "scorecardresearch", "doubleclick")):
+        return False
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+    except Exception:
+        return False
+    if width < 240 or height < 160:
+        host = url.split("/")[2][:48] if url.startswith("http") else "unknown"
+        print(f"Bỏ ảnh {width}x{height} từ {host}")
+        return False
+    return True
+
+
 def _save_image(url: str, dest: Path) -> bool:
     url = _http_url(url)
     if not url:
@@ -288,14 +309,7 @@ def _save_image(url: str, dest: Path) -> bool:
             data = response.read()
     except Exception:
         return False
-    if len(data) < 2000:
-        return False
-    if not (
-        data.startswith(b"\xff\xd8")
-        or data.startswith(b"\x89PNG")
-        or data.startswith(b"RIFF")
-        or data.startswith(b"GIF")
-    ):
+    if len(data) < 2000 or not _real_photo(url, data):
         return False
     dest.write_bytes(data)
     small = dest.with_suffix(".jpg")
@@ -960,7 +974,8 @@ def main() -> int:
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
     print(files["review.md"])
-    return 0 if "tin và một bài tiền đủ để thu" in files["review.md"] else 1
+    ready = "tin và một bài tiền đủ để thu" in files["review.md"] and (folder / "vi-du-tin.mp4").exists()
+    return 0 if ready else 1
 
 
 if __name__ == "__main__":

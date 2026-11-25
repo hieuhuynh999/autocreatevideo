@@ -39,15 +39,17 @@ def cut(source: Path, dest: Path, seconds: float = 35) -> Path:
     filter_complex = (
         "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:2[bg];"
         "[0:v]scale=1080:-2[fg];"
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v];"
+        "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aformat=sample_rates=44100:channel_layouts=stereo[a]"
     )
     proc = subprocess.run(
         [
             ffmpeg, "-y", "-i", str(source), "-t", f"{length:.2f}",
             "-filter_complex", filter_complex,
-            "-map", "[v]", "-map", "0:a:0?",
+            "-map", "[v]", "-map", "[a]",
+            "-r", "30",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+            "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             str(dest),
         ],
