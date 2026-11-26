@@ -30,9 +30,12 @@ RIVALS = {
     "tien": ("@EconomicsExplained", "@moneyguyshow", "@GrahamStephan"),
 }
 RULES = {
-    "short-tin": {"shape": (1080, 1920), "min": 15, "max": 59},
-    "short-tien": {"shape": (1080, 1920), "min": 15, "max": 59},
+    "tin": {"shape": (1280, 720), "min": 30, "max": 600, "fps": 20},
+    "short-tin": {"shape": (1080, 1920), "min": 15, "max": 40, "fps": 29},
+    "tien": {"shape": (1280, 720), "min": 30, "max": 600, "fps": 20},
+    "short-tien": {"shape": (1080, 1920), "min": 15, "max": 40, "fps": 29},
 }
+HOURS = {"tin": 8, "short-tin": 12, "tien": 16, "short-tien": 20}
 OUTLETS = ("PBS", "NPR", "New York Times")
 LUFS_RANGE = (-20.0, -9.0)
 BENCHMARK = Path(__file__).with_name("doi_thu_short.json")
@@ -182,7 +185,14 @@ def rivals(folder: Path) -> dict[str, dict]:
 
 
 def _slot(item: dict) -> str:
-    return "short-tien" if Path(item["file"]).name.startswith("short-tien") else "short-tin"
+    name = Path(item["file"]).name
+    if name.startswith("short-tien"):
+        return "short-tien"
+    if name.startswith("short-tin"):
+        return "short-tin"
+    if name.startswith("tai-chinh") or name.startswith("tien"):
+        return "tien"
+    return "tin"
 
 
 def check(folder: Path) -> tuple[bool, str]:
@@ -213,8 +223,9 @@ def check(folder: Path) -> tuple[bool, str]:
                 bad.append(f"khung {info['size']}, cần {rule['shape'][0]}x{rule['shape'][1]}")
             if length < rule["min"] or length > rule["max"]:
                 bad.append(f"dài {length:.0f}s, cần {rule['min']}–{rule['max']}s")
-            if not info["fps"] or info["fps"] < 29:
-                bad.append(f"{info['fps']} fps, cần ít nhất 29")
+            need_fps = rule.get("fps", 29)
+            if not info["fps"] or info["fps"] < need_fps:
+                bad.append(f"{info['fps']} fps, cần ít nhất {need_fps}")
             loud = None
             if not info["audio"]:
                 bad.append("không có tiếng")
@@ -224,30 +235,38 @@ def check(folder: Path) -> tuple[bool, str]:
                     bad.append(f"độ to {loud} LUFS, cần {LUFS_RANGE[0]:.0f} đến {LUFS_RANGE[1]:.0f}")
             if length and _dark_frames(path, length) >= 2:
                 bad.append("hình đen ở nhiều đoạn")
-            layout_bad, layout_warn = _layout_problems(path)
-            bad += layout_bad
-            warn += layout_warn
-            mark = bench.get("tin" if slot == "short-tin" else "tien") or {}
-            if mark.get("duration_median"):
-                low, high = mark["duration_low"], mark["duration_high"]
-                if length > high + 10 or length < low - 10:
-                    warn.append(f"dài {length:.0f}s, Short đối thủ {low:.0f}–{high:.0f}s (trung vị {mark['duration_median']:.0f}s)")
-                else:
-                    warn.append(f"dài {length:.0f}s, trong khoảng Short đối thủ {low:.0f}–{high:.0f}s")
-            if loud is not None and mark.get("lufs_median") is not None:
-                warn.append(
-                    f"độ to {loud:.1f} LUFS, đối thủ trung vị {mark['lufs_median']:.1f}; YouTube phát mọi video ở khoảng -14, video to hơn sẽ bị hạ xuống"
-                )
+            if path.with_suffix(".layout.json").exists():
+                layout_bad, layout_warn = _layout_problems(path)
+                bad += layout_bad
+                warn += layout_warn
+            if slot.startswith("short"):
+                mark = bench.get("tin" if slot == "short-tin" else "tien") or {}
+                if mark.get("duration_median"):
+                    low, high = mark["duration_low"], mark["duration_high"]
+                    if length > high + 10 or length < low - 10:
+                        warn.append(f"dài {length:.0f}s, Short đối thủ {low:.0f}–{high:.0f}s (trung vị {mark['duration_median']:.0f}s)")
+                    else:
+                        warn.append(f"dài {length:.0f}s, trong khoảng Short đối thủ {low:.0f}–{high:.0f}s")
+                if loud is not None and mark.get("lufs_median") is not None:
+                    warn.append(
+                        f"độ to {loud:.1f} LUFS, đối thủ trung vị {mark['lufs_median']:.1f}; YouTube phát mọi video ở khoảng -14, video to hơn sẽ bị hạ xuống"
+                    )
         if not title or len(title) > 100:
             bad.append(f"tiêu đề {len(title)} ký tự, cần 1–100")
-        if slot == "short-tien":
+        hour_match = re.search(r"T(\d{2}):", item.get("publish_at", ""))
+        hour = int(hour_match.group(1)) if hour_match else None
+        if hour != HOURS.get(slot):
+            bad.append(f"giờ công khai {hour}, cần {HOURS.get(slot)}:00 miền Đông")
+        if item.get("madeForKids") is True:
+            bad.append("đang đánh dấu dành cho trẻ em")
+        if slot in ("tien", "short-tien"):
             if not re.search(r"\d", title):
                 bad.append("tiêu đề bài tiền không có chữ số")
             if "not personal financial advice" not in description.lower():
                 bad.append("mô tả thiếu câu not personal financial advice")
-        if slot == "short-tin" and not any(name in description for name in OUTLETS):
-            bad.append("mô tả Short tin không nêu PBS, NPR hay New York Times")
-        if "#Shorts" not in title + description:
+        if slot in ("tin", "short-tin") and not any(name in description for name in OUTLETS):
+            bad.append("mô tả bản tin không nêu PBS, NPR hay New York Times")
+        if slot.startswith("short") and "#Shorts" not in title + description:
             bad.append("Short thiếu #Shorts")
         script = path.with_suffix(".txt")
         if script.exists():

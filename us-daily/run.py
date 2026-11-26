@@ -82,38 +82,50 @@ def _http_url(url: str) -> str:
     return ""
 
 
+def _pixelish(url: str) -> bool:
+    low = url.lower()
+    marks = (
+        "pixel", "1x1", "tracking", "spacer", "beacon", "analytics",
+        "doubleclick", "scorecardresearch", "facebook.com/tr", "pixel.gif",
+    )
+    return any(mark in low for mark in marks)
+
+
+def _known_width(node: ET.Element) -> int:
+    try:
+        return int(node.get("width") or 0)
+    except ValueError:
+        return 0
+
+
 def _image_url(item: ET.Element) -> str:
-    best = ""
-    best_width = -1
+    """Ảnh bài báo. Bỏ pixel theo dõi và ảnh đã ghi nhỏ hơn 240px."""
+    candidates: list[tuple[int, str]] = []
+
+    def add(url: str, width: int) -> None:
+        url = _http_url(url)
+        if not url or _pixelish(url):
+            return
+        if 0 < width < 240:
+            return
+        candidates.append((width, url))
+
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
-        url = _http_url(node.get("url") or "")
-        if not url:
-            continue
-        try:
-            width = int(node.get("width") or 0)
-        except ValueError:
-            width = 0
-        if width >= best_width:
-            best, best_width = url, width
-    if best:
-        return best
+        add(node.get("url") or "", _known_width(node))
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
     if thumb is not None:
-        found_thumb = _http_url(thumb.get("url") or "")
-        if found_thumb:
-            return found_thumb
+        add(thumb.get("url") or "", _known_width(thumb))
     enclosed = item.find("enclosure")
     if enclosed is not None and "image" in (enclosed.get("type") or ""):
-        found_file = _http_url(enclosed.get("url") or "")
-        if found_file:
-            return found_file
+        add(enclosed.get("url") or "", _known_width(enclosed))
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
     for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
-        found_src = _http_url(candidate)
-        if found_src:
-            return found_src
-    return ""
+        add(candidate, 0)
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return candidates[0][1]
 
 
 def _parse_feed(outlet: str, url: str, feed: int) -> list[Story]:
@@ -278,6 +290,18 @@ def _pick(groups: list[list[Story]]) -> list[tuple[Story, list[Story]]]:
     return chosen
 
 
+def _image_size(data: bytes) -> tuple[int, int] | None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            return image.size
+    except Exception:
+        return None
+
+
 def _save_image(url: str, dest: Path) -> bool:
     url = _http_url(url)
     if not url:
@@ -296,6 +320,9 @@ def _save_image(url: str, dest: Path) -> bool:
         or data.startswith(b"RIFF")
         or data.startswith(b"GIF")
     ):
+        return False
+    size = _image_size(data)
+    if size is None or size[0] < 240 or size[1] < 160:
         return False
     dest.write_bytes(data)
     small = dest.with_suffix(".jpg")
@@ -364,6 +391,7 @@ def news_script(when: datetime, groups: list[list[Story]], folder: Path) -> tupl
     for lead, others in chosen:
         dest = pictures / f"{len(ready):02d}.img"
         if not _save_image(lead.image, dest):
+            print(f"Bỏ ảnh không đủ lớn: {_family(lead.outlet)}: {lead.title}")
             continue
         different = [item for item in others if _family(item.outlet) != _family(lead.outlet)]
         outlets = [_family(lead.outlet)]
@@ -730,34 +758,70 @@ def _media_duration(ffmpeg: str, path: Path) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
+async def _speak_once(text: str) -> tuple[bytes, list[tuple[float, float, str]]]:
     import edge_tts
 
+    voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
+    audio = bytearray()
+    words: list[tuple[float, float, str]] = []
+    async for chunk in voice.stream():
+        if chunk["type"] == "audio":
+            audio.extend(chunk["data"])
+        elif chunk["type"] == "WordBoundary":
+            start = chunk["offset"] / 10_000_000
+            end = start + chunk["duration"] / 10_000_000
+            token = str(chunk["text"]).strip()
+            if token:
+                words.append((start, end, token))
+    if not audio or not words:
+        raise RuntimeError("no audio")
+    return bytes(audio), words
+
+
+async def _speak_timed(text: str, dest: Path) -> list[tuple[float, float, str]]:
+    """Đọc từng dòng để không vượt hạn giọng, rồi ghép lại đúng thứ tự."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    pieces = lines if len(lines) > 1 else [text.strip()]
+    work = dest.parent / f".{dest.stem}-voice"
+    work.mkdir(parents=True, exist_ok=True)
+    ffmpeg = _ffmpeg()
+    words: list[tuple[float, float, str]] = []
+    paths: list[Path] = []
+    cursor = 0.0
     last_error: Exception | None = None
-    for attempt in range(7):
-        voice = edge_tts.Communicate(text, "en-US-AndrewNeural", rate="-4%", boundary="WordBoundary")
-        audio = bytearray()
-        words: list[tuple[float, float, str]] = []
-        try:
-            async for chunk in voice.stream():
-                if chunk["type"] == "audio":
-                    audio.extend(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    start = chunk["offset"] / 10_000_000
-                    end = start + chunk["duration"] / 10_000_000
-                    token = str(chunk["text"]).strip()
-                    if token:
-                        words.append((start, end, token))
-        except Exception as exc:
-            last_error = exc
-            await asyncio.sleep(10 * (attempt + 1))
-            continue
-        if audio and words:
-            dest.write_bytes(bytes(audio))
-            return words
-        last_error = RuntimeError("no audio")
-        await asyncio.sleep(10 * (attempt + 1))
-    raise RuntimeError("không nhận được giọng đọc") from last_error
+    for index, line in enumerate(pieces):
+        audio = b""
+        part: list[tuple[float, float, str]] = []
+        for attempt in range(5):
+            try:
+                audio, part = await _speak_once(line)
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(8 * (attempt + 1))
+        if last_error is not None or not audio:
+            raise RuntimeError("không nhận được giọng đọc") from last_error
+        piece = work / f"{index:02d}.mp3"
+        piece.write_bytes(audio)
+        duration = _media_duration(ffmpeg, piece)
+        for start, end, token in part:
+            words.append((cursor + start, cursor + end, token))
+        paths.append(piece)
+        cursor += duration
+    if len(paths) == 1:
+        dest.write_bytes(paths[0].read_bytes())
+        return words
+    listing = work / "list.txt"
+    listing.write_text("".join(f"file '{path.as_posix()}'\n" for path in paths), encoding="utf-8")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not dest.exists():
+        raise RuntimeError(proc.stderr[-400:])
+    return words
 
 
 def _cue_groups(words: list[tuple[float, float, str]]) -> list[list[tuple[float, float, str]]]:
