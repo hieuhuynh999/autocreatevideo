@@ -81,7 +81,51 @@ def _load(name: str):
     return module
 
 
-def _marks(words):
+def _clean_token(token: str) -> str:
+    return token.lower().strip(".,!?;:\"'“”")
+
+
+def _find_phrase(tokens: list[str], needle: list[str], start: int) -> int | None:
+    if not needle:
+        return None
+    width = len(needle)
+    last = len(tokens) - width + 1
+    for at in range(start, max(start, last)):
+        if tokens[at : at + width] == needle:
+            return at
+    return None
+
+
+def _line_marks(words, spoken: str):
+    """Mỗi câu một cảnh. Edge-TTS không trả dấu chấm trong từng từ."""
+    lines = [line.strip() for line in spoken.splitlines() if line.strip()]
+    tokens = [_clean_token(token) for _start, _end, token in words]
+    cursor = 0
+    found = []
+    for index, line in enumerate(lines):
+        pieces = [_clean_token(part) for part in line.split()]
+        pieces = [part for part in pieces if part]
+        at = _find_phrase(tokens, pieces[:5], cursor)
+        if at is None:
+            at = _find_phrase(tokens, pieces[:2], cursor)
+        if at is None:
+            continue
+        start, _end, token = words[at]
+        found.append((start, f"line{index % 12}", token))
+        cursor = at + 1
+    if len(found) < max(2, len(lines) // 2) and words and lines:
+        step = max(1, len(words) // len(lines))
+        found = []
+        for index in range(len(lines)):
+            word_index = min(len(words) - 1, index * step)
+            start, _end, token = words[word_index]
+            found.append((start, f"line{index % 12}", token))
+    if not found and words:
+        found.append((words[0][0], "line0", words[0][2]))
+    return found
+
+
+def _marks(words, spoken: str = ""):
     """Đổi cảnh đúng lúc câu nói chạm cụm từ, không chờ hết một đoạn 6 giây."""
     full = " ".join(token for _start, _end, token in words)
     sample = full.lower()
@@ -90,11 +134,7 @@ def _marks(words):
     elif "twenty-four thousand" in sample or "index fund" in sample:
         board = FUND_BOARD
     else:
-        board = (
-            ("open", ("here is the number",)),
-            ("week", ("this week",)),
-            ("advice", ("not personal financial advice",)),
-        )
+        return _line_marks(words, spoken)
     spans = []
     cursor = 0
     for index, (_start, _end, token) in enumerate(words):
@@ -143,15 +183,18 @@ def _live_line(words, second: float) -> str:
             index = word_index
         else:
             break
-    window = words[max(0, index - 6) : index + 5]
+    window = words[max(0, index - 7) : index + 4]
     bits: list[str] = []
-    for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+    previous_end = None
+    for start, end, token in window:
+        # Khoảng nghỉ giữa hai câu. Không chấm trước mỗi từ viết hoa trong một tên riêng.
+        if bits and previous_end is not None and start - previous_end > 0.22:
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        previous_end = end
     return "".join(bits)
 
 
@@ -313,6 +356,45 @@ def _column(draw, x, base, height, width, fill, label, font) -> None:
     _text(draw, (x, base - height - 36), label, font, INK)
 
 
+def _line_picture(draw, fonts, name: str, unit: float, second: float) -> None:
+    """Mỗi câu một hình khác. Không ghi chữ số mới ngoài con số của bài."""
+    index = int(name.removeprefix("line") or "0")
+    kind = index % 6
+    if kind == 0:
+        for item in range(4):
+            _coin(draw, 250 + item * 150, 250 + int(18 * math.sin(second * 3 + item)), 26)
+    elif kind == 1:
+        draw.polygon([(400, 400), (620, 210), (840, 400)], fill=(186, 48, 36), outline=INK)
+        draw.rectangle((450, 400, 790, 520), fill=(255, 236, 210), outline=INK, width=4)
+        draw.rectangle((580, 440, 660, 520), fill=(90, 60, 40))
+    elif kind == 2:
+        for item in range(4):
+            x = 240 + item * 220
+            lift = int(24 * math.sin(second * 2 + item))
+            draw.rounded_rectangle((x, 230 + lift, x + 180, 430 + lift), radius=12, fill=(255, 248, 230), outline=INK, width=4)
+    elif kind == 3:
+        draw.rounded_rectangle((280, 200, 980, 500), radius=12, fill=(255, 252, 242), outline=INK, width=5)
+        for row in range(4):
+            shade = GOLD if row == int(second * 2) % 4 else (220, 214, 200)
+            draw.rectangle((340, 250 + row * 52, 900, 284 + row * 52), fill=shade)
+    elif kind == 4:
+        for day in range(7):
+            x = 250 + day * 120
+            fill = GOLD if day == int(unit * 6) else (255, 255, 255)
+            draw.rounded_rectangle((x, 250, x + 90, 380), radius=8, fill=fill, outline=INK, width=3)
+    else:
+        draw.rounded_rectangle((300, 230, 980, 470), radius=16, fill=(255, 248, 230), outline=INK, width=5)
+        _text(draw, (360, 300), "an example", fonts["mid"], INK)
+        _text(draw, (360, 370), "not a promise", fonts["small"], (120, 50, 40))
+
+
+def _badge(draw, fonts, number: str) -> None:
+    label = number.strip() or "?"
+    font = fonts["number"] if len(label) <= 6 else fonts["mid"] if len(label) <= 12 else fonts["small"]
+    draw.rounded_rectangle((200, 48, 760, 148), radius=14, fill=(255, 248, 230), outline=(186, 48, 36), width=4)
+    _text(draw, (220, 58), label, font, (186, 48, 36))
+
+
 def _caption(draw, font, text: str) -> None:
     draw.rounded_rectangle((40, 600, 1240, 700), radius=16, fill=(16, 16, 18))
     lines, current = [], ""
@@ -410,6 +492,8 @@ def _pen_tip(name: str, unit: float, second: float):
         return (540 + 260 * unit, 290)
     if name == "cut":
         return (600, 500 - (300 - 160 * unit))
+    if name.startswith("line"):
+        return (360 + 280 * unit, 300)
     return (500 + 380 * unit, 330)
 
 
@@ -592,6 +676,8 @@ def _act(draw, fonts, name: str, unit: float, second: float, index: int, number:
         knob = 480 + int(260 * unit)
         draw.rounded_rectangle((460, 240, 860, 340), radius=40, fill=(48, 150, 86) if unit > 0.5 else (180, 180, 180), outline=INK, width=4)
         draw.ellipse((knob, 220, knob + 120, 360), fill=(255, 255, 255), outline=INK, width=4)
+    elif name.startswith("line"):
+        _line_picture(draw, fonts, name, unit, second)
     else:
         draw.rounded_rectangle((420, 160, 980, 360), radius=16, fill=(255, 248, 230), outline=INK, width=5)
         _text(draw, (470, 210), "an example", fonts["mid"], INK)
@@ -626,12 +712,13 @@ def _frame(words, marks, fonts, number: str, second: float):
     end = marks[index + 1][0] if index + 1 < len(marks) else words[-1][1]
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
+    _badge(draw, fonts, number)
     _caption(draw, fonts["caption"], _live_line(words, second))
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, spoken: str) -> None:
+    marks = _marks(words, spoken)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -687,7 +774,7 @@ def main() -> int:
     audio = folder / "tai-chinh-1.mp3"
     words = asyncio.run(run._speak_timed(item["spoken"], audio))
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], item["spoken"])
     print(dest)
     return 0
 
