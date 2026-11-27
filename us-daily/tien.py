@@ -145,13 +145,16 @@ def _live_line(words, second: float) -> str:
             break
     window = words[max(0, index - 6) : index + 5]
     bits: list[str] = []
-    for _start, _end, token in window:
-        if bits and token[:1].isupper() and (len(token) == 1 or not token.isupper()):
+    previous_end = None
+    for start, end, token in window:
+        gap = start - previous_end if previous_end is not None else 0
+        if bits and gap > 0.45:
             bits.append(". " + token)
         elif bits:
             bits.append(" " + token)
         else:
             bits.append(token)
+        previous_end = end
     return "".join(bits)
 
 
@@ -618,6 +621,19 @@ def _fonts(draw_mod) -> dict:
     }
 
 
+def _badge(draw, fonts, number: str) -> None:
+    font = fonts["mid"]
+    box = draw.textbbox((0, 0), number, font=font)
+    if box[2] - box[0] > 320:
+        font = fonts["small"]
+        box = draw.textbbox((0, 0), number, font=font)
+    width = box[2] - box[0]
+    right = 1224
+    left = max(640, right - width - 40)
+    draw.rounded_rectangle((left, 46, right, 128), radius=14, fill=(186, 48, 36))
+    _text(draw, (left + 18, 64), number, font, (255, 255, 255))
+
+
 def _frame(words, marks, fonts, number: str, second: float):
     image = Image.new("RGB", (W, H), (255, 255, 255))
     draw = ImageDraw.Draw(image)
@@ -626,12 +642,57 @@ def _frame(words, marks, fonts, number: str, second: float):
     end = marks[index + 1][0] if index + 1 < len(marks) else words[-1][1]
     unit = (second - start) / max(0.35, end - start)
     _act(draw, fonts, name, unit, second, index, number)
+    _badge(draw, fonts, number)
     _caption(draw, fonts["caption"], _live_line(words, second))
     return image
 
 
-def _render(draw_mod, words, audio: Path, dest: Path, number: str) -> None:
-    marks = _marks(words)
+def _scene_name(text: str, index: int, last: int) -> str:
+    sample = text.lower()
+    if index == last or "not personal" in sample:
+        return "advice"
+    if "this week" in sample:
+        return "week"
+    if any(phrase in sample for phrase in ("source", "pay stub", "statement", "receipt")):
+        return "statement"
+    return "open"
+
+
+def _join_lines(draw_mod, parts: list[tuple[Path, list]], dest: Path) -> tuple[list, list]:
+    ffmpeg = draw_mod._ffmpeg_bin()
+    words = []
+    marks = []
+    offset = 0.0
+    last = len(parts) - 1
+    listing = dest.with_suffix(".list.txt")
+    rows = []
+    for index, (path, part_words) in enumerate(parts):
+        rows.append(f"file '{path.as_posix()}'")
+        text = " ".join(token for _start, _end, token in part_words)
+        marks.append((offset, _scene_name(text, index, last), part_words[0][2] if part_words else "number"))
+        for start, end, token in part_words:
+            words.append((start + offset, end + offset, token))
+        offset += draw_mod._duration(path)
+    listing.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not dest.exists():
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c:a", "libmp3lame", "-ar", "24000", "-ac", "1", str(dest)],
+            capture_output=True,
+            text=True,
+        )
+    if proc.returncode != 0 or not dest.exists():
+        raise RuntimeError(proc.stderr[-400:])
+    return words, marks
+
+
+def _render(draw_mod, words, audio: Path, dest: Path, number: str, marks=None) -> None:
+    if marks is None:
+        marks = _marks(words)
     log = dest.with_suffix(".canh.txt")
     lines = [f"{start:6.1f}s {name} (từ «{token}»)" for start, name, token in marks]
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -684,10 +745,22 @@ def main() -> int:
     print(item["title"], item["words"])
     text = run._package("finance", item["spoken"], item["title"], [item["source"]], shot)
     (folder / "finance-1.txt").write_text(text, encoding="utf-8")
+    lines = [line.strip() for line in item["spoken"].splitlines() if line.strip()]
+    work = folder / "tien-cau"
+    work.mkdir(parents=True, exist_ok=True)
+
+    async def voices():
+        spoken = []
+        for index, line in enumerate(lines):
+            dest_part = work / f"cau-{index:02d}.mp3"
+            spoken.append((dest_part, await run._speak_timed(line, dest_part)))
+        return spoken
+
+    parts = asyncio.run(voices())
     audio = folder / "tai-chinh-1.mp3"
-    words = asyncio.run(run._speak_timed(item["spoken"], audio))
+    words, marks = _join_lines(draw_mod, parts, audio)
     dest = folder / "tai-chinh-1.mp4"
-    _render(draw_mod, words, audio, dest, item["number"])
+    _render(draw_mod, words, audio, dest, item["number"], marks)
     print(dest)
     return 0
 

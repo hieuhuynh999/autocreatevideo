@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -82,17 +83,30 @@ def _http_url(url: str) -> str:
     return ""
 
 
+def _pixelish(url: str) -> bool:
+    text = url.lower()
+    return any(word in text for word in ("pixel", "1x1", "tracking", "spacer", "beacon", "analytics"))
+
+
+def _usable_image(url: str, width: int = 0) -> bool:
+    if not url or _pixelish(url):
+        return False
+    if 0 < width < 240:
+        return False
+    return True
+
+
 def _image_url(item: ET.Element) -> str:
     best = ""
     best_width = -1
     for node in item.findall("{http://search.yahoo.com/mrss/}content"):
         url = _http_url(node.get("url") or "")
-        if not url:
-            continue
         try:
             width = int(node.get("width") or 0)
         except ValueError:
             width = 0
+        if not _usable_image(url, width):
+            continue
         if width >= best_width:
             best, best_width = url, width
     if best:
@@ -100,18 +114,22 @@ def _image_url(item: ET.Element) -> str:
     thumb = item.find("{http://search.yahoo.com/mrss/}thumbnail")
     if thumb is not None:
         found_thumb = _http_url(thumb.get("url") or "")
-        if found_thumb:
+        try:
+            thumb_width = int(thumb.get("width") or 0)
+        except ValueError:
+            thumb_width = 0
+        if _usable_image(found_thumb, thumb_width):
             return found_thumb
     enclosed = item.find("enclosure")
     if enclosed is not None and "image" in (enclosed.get("type") or ""):
         found_file = _http_url(enclosed.get("url") or "")
-        if found_file:
+        if _usable_image(found_file):
             return found_file
     encoded = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
     raw = encoded.text if encoded is not None and encoded.text else ""
     for candidate in re.findall(r"""src=['"]([^'"]+)""", raw):
         found_src = _http_url(candidate)
-        if found_src:
+        if _usable_image(found_src):
             return found_src
     return ""
 
@@ -296,6 +314,17 @@ def _save_image(url: str, dest: Path) -> bool:
         or data.startswith(b"RIFF")
         or data.startswith(b"GIF")
     ):
+        return False
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+    except Exception:
+        return False
+    if width < 240 or height < 160:
         return False
     dest.write_bytes(data)
     small = dest.with_suffix(".jpg")
@@ -956,6 +985,22 @@ def main() -> int:
         ),
         "review.md": _review(when, finance, news, used, errors, video_note),
     }
+    (folder / "tin.json").write_text(
+        json.dumps(
+            [
+                {
+                    "outlet": item["outlet"],
+                    "title": item["title"],
+                    "link": item["link"],
+                    "others": item["others"],
+                }
+                for item in used
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     for name, text in files.items():
         (folder / name).write_text(text, encoding="utf-8")
         print(f"{folder / name}")
